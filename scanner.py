@@ -1,183 +1,293 @@
 #!/usr/bin/env python3
+# scan.py
+from __future__ import annotations
 import time
 import json
 import argparse
-from datetime import datetime
-from cc1101_driver import CC1101
-from decoders import DECODER_PIPELINE
+import requests
+import logging
+from datetime import datetime, timezone
+from typing import Tuple, Optional, Dict, Any
+from decoders import DECODER_PIPELINE, BaseDecoder
 
-# --- Comprehensive Scanner Configurations ---
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
+# --- Evil Crow RF V2 API Client ---
+class EvilCrow:
+    """A small, tolerant client for Evil Crow RF V2 HTTP API (WiFi)."""
+    def __init__(self, ip_address: str = "192.168.4.1", timeout: float = 5.0, retries: int = 2):
+        self.base_url = f"http://{ip_address}"
+        self.session = requests.Session()
+        self.timeout = timeout
+        self.retries = retries
+        # Basic connectivity check
+        for attempt in range(self.retries + 1):
+            try:
+                r = self.session.get(self.base_url, timeout=self.timeout)
+                r.raise_for_status()
+                logging.debug("Connected to EvilCrow UI.")
+                break
+            except requests.RequestException as e:
+                if attempt == self.retries:
+                    raise ConnectionError(f"Cannot connect to EvilCrow at {self.base_url}: {e}")
+                time.sleep(0.5)
+
+    def _get(self, endpoint: str, params: dict = None) -> Optional[str]:
+        try:
+            r = self.session.get(f"{self.base_url}/{endpoint.lstrip('/')}", params=params, timeout=self.timeout)
+            r.raise_for_status()
+            return r.text.strip()
+        except requests.RequestException as e:
+            logging.debug(f"HTTP error calling {endpoint}: {e}")
+            return None
+
+    def _send_command(self, command: str, radio: str):
+        return self._get("api", {"radio": radio, "command": command})
+
+    def set_radio_config(self, radio: str, config: Dict[str, Any]) -> bool:
+        # config expected to have keys 'freq' (MHz) and 'name' (mod string)
+        try:
+            freq_hz = int(config['freq'] * 1_000_000)
+            self._send_command(f"set_freq {freq_hz}", radio)
+            self._send_command(f"set_mod {config['name']}", radio)
+            return True
+        except Exception as e:
+            logging.debug(f"Failed to set radio config: {e}")
+            return False
+
+    def get_rssi(self, radio: str, freq_mhz: int) -> Optional[int]:
+        # Attempt to set the freq and call a get_rssi command; returns integer or None
+        self._send_command(f"set_freq {int(freq_mhz * 1_000_000)}", radio)
+        out = self._send_command("get_rssi", radio)
+        if out is None:
+            return None
+        try:
+            return int(out.strip())
+        except ValueError:
+            # sometimes the device returns "RSSI:-75"
+            m = None
+            try:
+                import re
+                m = re.search(r'-\d+', out)
+            except Exception:
+                pass
+            if m:
+                return int(m.group(0))
+            return None
+
+    def receive_packet(self, radio: str, timeout_ms: int = 500) -> Tuple[Optional[bytes], Optional[int], Optional[int]]:
+        # Start RX sniffing and parse simple expected format
+        out = self._send_command("rx_sniff on", radio)
+        if not out:
+            return None, None, None
+        # Try to parse: flexible parsing
+        try:
+            # look for hex payload anywhere
+            import re
+            m_hex = re.search(r'([0-9A-Fa-f]{4,})', out)
+            m_rssi = re.search(r'RSSI[:=]?\s*(-?\d+)', out)
+            m_lqi = re.search(r'LQI[:=]?\s*(\d+)', out)
+            payload = bytes.fromhex(m_hex.group(1)) if m_hex else None
+            rssi = int(m_rssi.group(1)) if m_rssi else None
+            lqi = int(m_lqi.group(1)) if m_lqi else None
+            return payload, rssi, lqi
+        except Exception as e:
+            logging.debug(f"Failed to parse RX output: {out} / {e}")
+            return None, None, None
+
+# --- Scanner configs ---
 SCAN_CONFIGS = [
-    # 433 MHz Band (Very Common IoT, Remotes)
     {'name': 'OOK_4_8_KB', 'freq': 433},
-    {'name': 'GFSK_1_2_KB', 'freq': 433},
     {'name': 'GFSK_38_4_KB', 'freq': 433},
-    {'name': 'GFSK_100_KB', 'freq': 433},
-    {'name': 'MSK_250_KB', 'freq': 433},
-
-    # 315 MHz Band (Older Remotes, Keyfobs, TPMS)
     {'name': 'OOK_4_8_KB', 'freq': 315},
-    {'name': 'GFSK_1_2_KB', 'freq': 315},
     {'name': 'GFSK_38_4_KB', 'freq': 315},
-
-    # 915 MHz Band (Modern IoT, Pagers, GPS Trackers in US)
     {'name': 'GFSK_38_4_KB', 'freq': 915},
     {'name': 'GFSK_100_KB', 'freq': 915},
-    {'name': 'MSK_250_KB', 'freq': 915},
-    {'name': 'MSK_500_KB', 'freq': 915},
-    
-    # 868 MHz Band (EU IoT and SRD)
     {'name': 'GFSK_38_4_KB', 'freq': 868},
-    {'name': 'GFSK_100_KB', 'freq': 868},
-    {'name': 'MSK_250_KB', 'freq': 868},
-    
-    # 405 MHz MedRadio Band
-    {'name': 'FSK_MANCHESTER_MEDRADIO', 'freq': 405},
 ]
-RSSI_THRESHOLD = -90.0  # dBm - more sensitive
-ANALYSIS_DURATION = 10  # Seconds to listen on an active frequency
+RSSI_THRESHOLD = -85
+ANALYSIS_DURATION = 10  # seconds per found signal
+GONE_TIMEOUT = 300  # seconds before a device is considered gone
 
-# --- Stateful Device Tracking ---
-known_devices = {}
+# Memory of seen devices
+known_devices: Dict[str, Dict[str, Any]] = {}
 
-def process_packet(payload, rssi, lqi, config_name):
-    """Runs a payload through the decoder pipeline and updates device state."""
-    global known_devices
-    
+# --- packet processing & device bookkeeping ---
+def process_packet(payload: bytes, rssi: int, lqi: int, config_name: str, allow_sensitive: bool = False):
+    """Run the payload through the decoder pipeline and update known_devices."""
+    if not payload:
+        return
+
+    # Quick fingerprint
+    short_hash = hashlib_sha1_short(payload)
+    now = time.time()
+    seen = known_devices.get(short_hash)
+    if seen:
+        seen['count'] += 1
+        seen['last_seen'] = now
+        if rssi is not None:
+            seen['rssi'] = rssi
+        if lqi is not None:
+            seen['lqi'] = lqi
+    else:
+        known_devices[short_hash] = {
+            'id': short_hash,
+            'first_seen': now,
+            'last_seen': now,
+            'count': 1,
+            'rssi': rssi,
+            'lqi': lqi,
+            'freq_mode': config_name,
+            'detections': []
+        }
+
+    # Run decoders in order; stop at first match that returns something (except Generic -> still record)
+    decoded_any = False
     for decoder in DECODER_PIPELINE:
-        decoded_data = decoder.decode(payload, config_name)
-        if decoded_data:
-            device_id = decoded_data['id']
-            current_time = time.time()
-            
-            if device_id not in known_devices:
-                # NEW DEVICE FOUND
-                print(f"\n[+] NEW DEVICE DETECTED: {device_id}")
-                known_devices[device_id] = {
-                    'first_seen': current_time,
-                    'protocol': decoded_data['protocol'],
-                    'last_seen': current_time,
-                    'last_rssi': rssi,
-                    'last_lqi': lqi, # CHANGED: Added LQI
-                    'last_data': decoded_data['data'],
-                    'last_config': config_name
-                }
-                print_device_report(device_id)
-            else:
-                # Update existing device
-                known_devices[device_id]['last_seen'] = current_time
-                known_devices[device_id]['last_rssi'] = rssi
-                known_devices[device_id]['last_lqi'] = lqi # CHANGED: Added LQI
-                if known_devices[device_id]['last_data'] != decoded_data['data']:
-                    known_devices[device_id]['last_data'] = decoded_data['data']
-                    print(f"[*] Device {device_id} updated with new data.")
-                    print_device_report(device_id)
+        try:
+            result = decoder.decode(payload, config_name, allow_sensitive=allow_sensitive)
+        except Exception as e:
+            logging.debug(f"Decoder {decoder.__class__.__name__} crashed: {e}")
+            result = None
+        if result:
+            decoded_any = True
+            # Append result; if decoder flagged sensitive, redact hex unless allowed
+            if getattr(decoder, 'sensitive', False) and not allow_sensitive:
+                # Remove payload_hex/raw fields
+                if isinstance(result.get('data'), dict):
+                    result['data'].pop('payload_hex', None)
+                    result['data'].pop('raw', None)
+            known_devices[short_hash]['detections'].append({
+                'time': now,
+                'decoder': decoder.__class__.__name__,
+                'result': result
+            })
+            # stop on strong non-generic decoders (keep generic if nothing else matched)
+            if decoder.__class__.__name__ != 'Generic':
+                break
 
-            return device_id
-    return None
+    # If nothing specifically matched, run Generic to store basic payload length/hex (but respect sensitivity flag)
+    if not decoded_any:
+        from decoders import GenericDecoder
+        gd = GenericDecoder()
+        res = gd.decode(payload, config_name, allow_sensitive=allow_sensitive)
+        if not allow_sensitive:
+            # still include hex for generic entries; that's useful for fingerprinting
+            pass
+        known_devices[short_hash]['detections'].append({
+            'time': now,
+            'decoder': 'Generic',
+            'result': res
+        })
 
-def print_device_report(device_id):
-    """Prints a formatted report for a device."""
-    device = known_devices[device_id]
-    print("---------------------------------------------------")
-    print(f"  ID:         {device_id}")
-    print(f"  Protocol:   {device['protocol']}")
-    print(f"  Last Seen:  {datetime.fromtimestamp(device['last_seen']).strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  RSSI:       {device['last_rssi']:.1f} dBm")
-    print(f"  LQI:        {device['last_lqi']}") # CHANGED: Added LQI
-    print(f"  Radio Cfg:  {device['last_config']}")
-    print(f"  Data:       {json.dumps(device['data'])}")
-    print("---------------------------------------------------\n")
+def hashlib_sha1_short(data: bytes, length: int = 8) -> str:
+    import hashlib
+    return hashlib.sha1(data).hexdigest()[:length]
 
-def hunt(radio):
-    """
-    CHANGED: This function now uses the driver's dedicated get_rssi_dbm() method
-    for a much more reliable and faster signal hunt.
-    """
-    print("--- HUNTING ---")
-    scan_freqs = sorted(list(set(cfg['freq'] for cfg in SCAN_CONFIGS)))
-    
-    for freq in scan_freqs:
-        radio.set_frequency_band(freq)
-        rssi = radio.get_rssi_dbm()
-        if rssi and rssi > RSSI_THRESHOLD:
-            print(f"[+] Activity detected at {freq} MHz (RSSI: {rssi:.1f} dBm)")
-            return freq
-    
-    print("[-] No signals found.")
-    return None
-    
-def analyze(radio, target_freq):
-    """Analyzes a signal on a specific frequency for a set duration."""
-    print(f"--- ANALYZING {target_freq} MHz for {ANALYSIS_DURATION} seconds ---")
-    seen_in_this_analysis = set()
-    start_time = time.time()
-    
-    while time.time() - start_time < ANALYSIS_DURATION:
-        for config in SCAN_CONFIGS:
-            if config['freq'] != target_freq: continue
-            
-            try:
-                radio.apply_config_profile(config['name'])
-                radio.set_frequency_band(config['freq'])
-                radio.set_packet_handling_mode() # CHANGED: Explicitly set packet mode
-                
-                # CHANGED: Unpack the new LQI value from the driver's response
-                payload, rssi, lqi = radio.receive_packet(timeout_ms=100)
-                
-                if payload:
-                    # CHANGED: Pass LQI to the processing function
-                    device_id = process_packet(payload, rssi, lqi, config['name'])
-                    if device_id: seen_in_this_analysis.add(device_id)
-            except Exception as e:
-                print(f"Error during analysis: {e}")
-                
-    return seen_in_this_analysis
+def print_device_report(device_id: str):
+    """Pretty-print an entry from known_devices as JSON to stdout/log."""
+    entry = known_devices.get(device_id)
+    if not entry:
+        logging.warning(f"No device with id {device_id}")
+        return
+    # Build a sanitized report (mask sensitive fields by default)
+    report = {
+        'id': entry['id'],
+        'first_seen': datetime.fromtimestamp(entry['first_seen'], tz=timezone.utc).isoformat(),
+        'last_seen': datetime.fromtimestamp(entry['last_seen'], tz=timezone.utc).isoformat(),
+        'count': entry['count'],
+        'rssi': entry.get('rssi'),
+        'lqi': entry.get('lqi'),
+        'freq_mode': entry.get('freq_mode'),
+        'detections': []
+    }
+    for d in entry['detections']:
+        det = d['result'].copy()
+        # If the decoder result contains raw payload fields, remove them by default
+        if isinstance(det.get('data'), dict):
+            det['data'] = dict(det['data'])  # shallow copy
+            det['data'].pop('payload_hex', None)
+            det['data'].pop('raw', None)
+        report['detections'].append({'time': datetime.fromtimestamp(d['time'], tz=timezone.utc).isoformat(), 'decoder': d['decoder'], 'result': det})
+    print(json.dumps(report, indent=2))
 
-def check_for_gone_devices(scan_start_time, interval):
-    """Checks if any known devices have not been seen for a while."""
-    global known_devices
-    timeout = interval * 2.5
-    for device_id in list(known_devices.keys()):
-        if scan_start_time - known_devices[device_id]['last_seen'] > timeout:
-            print(f"[-] DEVICE GONE: {device_id} (Last seen {int(scan_start_time - known_devices[device_id]['last_seen'])}s ago)")
-            del known_devices[device_id]
+def check_for_gone_devices(scan_start_time: float, interval: int):
+    """Remove devices not seen for GONE_TIMEOUT and log them as gone."""
+    now = time.time()
+    gone = []
+    for dev_id, info in list(known_devices.items()):
+        if now - info['last_seen'] > GONE_TIMEOUT:
+            gone.append(dev_id)
+    for dev_id in gone:
+        logging.info(f"[GONE] Device {dev_id} last seen at {datetime.fromtimestamp(known_devices[dev_id]['last_seen']).strftime('%Y-%m-%d %H:%M:%S')}; removing.")
+        # Optionally print a full report before removing
+        print_device_report(dev_id)
+        del known_devices[dev_id]
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Nmap-like scanner for the Sub-GHz spectrum using a CC1101.")
-    parser.add_argument('--interval', type=int, default=120, help='Time in seconds between scans.')
-    # CHANGED: Added GPIO chip and CS pin arguments for flexibility
-    parser.add_argument('--gpiochip', type=str, default='gpiochip4', help='GPIO chip for CSn pin (e.g., gpiochip0 on RPi 4, gpiochip4 on RPi 5/Zero2W).')
-    parser.add_argument('--cspin', type=int, default=8, help='GPIO pin number for CSn (CE0 is BCM pin 8).')
-    args = parser.parse_args()
-
+# --- Main loop ---
+def main(args):
     try:
-        # CHANGED: Updated constructor call
-        radio = CC1101(chip_name=args.gpiochip, cs_pin=args.cspin)
-        radio.reset()
-        if radio.get_version() != 0x14:
-            raise IOError("CC1101 not found or version mismatch!")
-        print("RF Nmap Scanner Initialized. Press Ctrl+C to exit.")
-        print(f"Scanning every {args.interval} seconds.")
+        crow = EvilCrow(args.ip)
+        logging.info("Connected to Evil Crow.")
+    except ConnectionError as e:
+        logging.error(f"Fatal: {e}")
+        return
 
-        while True:
-            scan_time = time.time()
-            print(f"\n--- Starting Scan @ {datetime.fromtimestamp(scan_time).strftime('%H:%M:%S')} ---")
-            
-            seen_this_scan = set()
-            active_freq = hunt(radio)
+    allowed_freqs = [int(f.strip()) for f in args.freqs.split(',') if f.strip()]
+    active_scan_configs = [c for c in SCAN_CONFIGS if c['freq'] in allowed_freqs]
+    scan_freqs = sorted({c['freq'] for c in active_scan_configs})
+    logging.info(f"Scanning frequencies: {', '.join(map(str,scan_freqs))} MHz every {args.interval}s.")
 
-            if active_freq:
-                seen_in_analysis = analyze(radio, active_freq)
-                seen_this_scan.update(seen_in_analysis)
-            
-            check_for_gone_devices(scan_time, args.interval)
-            
-            print(f"--- Scan complete. {len(known_devices)} devices currently tracked. Waiting for next interval. ---")
-            time.sleep(args.interval)
+    hunter = args.hunter_radio
+    analyst = args.analyst_radio
 
-    except IOError as e:
-        print(f"\n[FATAL] A hardware error occurred: {e}")
+    while True:
+        scan_time = time.time()
+        logging.info(f"--- Starting scan at {datetime.fromtimestamp(scan_time).strftime('%H:%M:%S')} ---")
+
+        # Hunt phase: quick RSSI sweep
+        active_freq = None
+        for freq in scan_freqs:
+            rssi = crow.get_rssi(hunter, freq)
+            if rssi is not None:
+                logging.debug(f"Hunter RSSI at {freq} MHz: {rssi}")
+                if rssi > RSSI_THRESHOLD:
+                    logging.info(f"Activity detected on {freq} MHz (RSSI {rssi}).")
+                    active_freq = freq
+                    break
+
+        # Analyze phase
+        if active_freq is not None:
+            logging.info(f"Analyst tuning to {active_freq} MHz for {ANALYSIS_DURATION}s.")
+            analysis_start = time.time()
+            while time.time() - analysis_start < ANALYSIS_DURATION:
+                for cfg in (c for c in active_scan_configs if c['freq'] == active_freq):
+                    crow.set_radio_config(analyst, cfg)
+                    payload, rssi, lqi = crow.receive_packet(analyst)
+                    if payload:
+                        try:
+                            process_packet(payload, rssi, lqi, cfg['name'], allow_sensitive=args.allow_sensitive)
+                        except Exception as e:
+                            logging.debug(f"process_packet error: {e}")
+        else:
+            logging.debug("No active frequency detected this cycle.")
+
+        # Cleanup and wait
+        check_for_gone_devices(scan_time, args.interval)
+        logging.info(f"Scan complete. {len(known_devices)} devices tracked.")
+        time.sleep(args.interval)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="EvilCrow RF V2 Nmap-like scanner (improved).")
+    parser.add_argument('--interval', type=int, default=120, help='Seconds between scans.')
+    parser.add_argument('--ip', type=str, default="192.168.4.1", help='Evil Crow IP.')
+    parser.add_argument('--freqs', type=str, default="433,915", help='Comma-separated freqs in MHz.')
+    parser.add_argument('--allow-sensitive', action='store_true', help='Allow storing/displaying potentially sensitive payloads (credit card, medradio, gps).')
+    parser.add_argument('--hunter-radio', type=str, default='A', help='Hunter radio letter (default A).')
+    parser.add_argument('--analyst-radio', type=str, default='B', help='Analyst radio letter (default B).')
+    args = parser.parse_args()
+    try:
+        main(args)
     except KeyboardInterrupt:
-        print("\nExiting.")
-
+        logging.info("Exiting on user interrupt.")
