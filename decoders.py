@@ -1,164 +1,259 @@
+# decoders.py
+from __future__ import annotations
 import hashlib
 import re
 import math
+from typing import Optional, Dict, Any, List
+
+# Global policy: don't return or store sensitive raw payloads unless explicitly allowed.
+ALLOW_SENSITIVE_BY_DEFAULT = False
+
+def _calculate_entropy(data: bytes) -> float:
+    """Shannon entropy of a byte string."""
+    if not data:
+        return 0.0
+    counts = [0]*256
+    for b in data:
+        counts[b] += 1
+    ent = 0.0
+    length = len(data)
+    for c in counts:
+        if c == 0:
+            continue
+        p = c / length
+        ent -= p * math.log2(p)
+    return ent
 
 class BaseDecoder:
-    """Base class for all decoders. Ensures a common interface."""
-    def decode(self, data_bytes, radio_config):
+    """Base class for decoders; decode returns a dict or None."""
+    sensitive: bool = False  # If True, treat output as potentially sensitive (do not include raw payload by default)
+    name: str = "Base"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT) -> Optional[Dict[str, Any]]:
         raise NotImplementedError
 
-def _calculate_entropy(data):
-    """Calculates the Shannon entropy of a byte string."""
-    if not data:
-        return 0
-    entropy = 0
-    for x in range(256):
-        p_x = float(data.count(x)) / len(data)
-        if p_x > 0:
-            entropy += - p_x * math.log2(p_x)
-    return entropy
+    @staticmethod
+    def make_id(prefix: str, data: bytes, length: int = 8) -> str:
+        return f"{prefix}-{hashlib.sha1(data).hexdigest()[:length]}"
 
+# --- Specific decoders ---
 class CreditCardSkimmerDecoder(BaseDecoder):
-    """Looks for the specific format of raw credit card magnetic stripe data."""
-    def decode(self, data, radio_config):
+    """Detects magnetic stripe Track 1/2 patterns. Marked sensitive."""
+    sensitive = True
+    name = "CreditCardSkimmer"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
         try:
             text = data.decode('ascii', errors='ignore')
-            track2_match = re.search(r';(\d{10,19}=\d{4,})(\d+)\?', text)
-            if track2_match:
-                return {'protocol': '!!! Credit Card Skimmer !!!', 'id': f'skimmer-alert-{hashlib.sha1(data).hexdigest()[:8]}', 'data': {'alert': 'High confidence skimmer detected', 'type': 'Track 2 Data', 'masked_pan': track2_match.group(1)[:4] + 'x' * (len(track2_match.group(1)) - 8) + track2_match.group(1)[-4:]}}
-            track1_match = re.search(r'%B(\d{10,19})\^([^\^]+)\^(\d{4,})\?', text)
-            if track1_match:
-                 return {'protocol': '!!! Credit Card Skimmer !!!', 'id': f'skimmer-alert-{hashlib.sha1(data).hexdigest()[:8]}', 'data': {'alert': 'High confidence skimmer detected', 'type': 'Track 1 Data', 'masked_pan': track1_match.group(1)[:4] + 'x' * (len(track1_match.group(1)) - 8) + track1_match.group(1)[-4:]}}
-        except: return None
+            # Track 2 e.g. ;<PAN>=<exp><svc>...?
+            track2 = re.search(r';(\d{10,19})=(\d{4})(\d*?)\?', text)
+            if track2:
+                pan = track2.group(1)
+                masked = pan[:4] + 'x'*(len(pan)-8) + pan[-4:] if len(pan) >= 8 else 'x'*len(pan)
+                out = {
+                    'protocol': 'CreditCardSkimmer (Track2)',
+                    'id': self.make_id('skimmer', data),
+                    'data': {'alert': 'Possible Track2 magnetic stripe data', 'masked_pan': masked}
+                }
+                # Do not include raw payload unless allowed explicitly
+                if allow_sensitive:
+                    out['data']['payload_hex'] = data.hex()
+                return out
+
+            # Track 1 e.g. %B<PAN>^NAME^YYMM...
+            track1 = re.search(r'%B(\d{10,19})\^([^^]+)\^(\d{4})', text)
+            if track1:
+                pan = track1.group(1)
+                masked = pan[:4] + 'x'*(len(pan)-8) + pan[-4:] if len(pan) >= 8 else 'x'*len(pan)
+                out = {
+                    'protocol': 'CreditCardSkimmer (Track1)',
+                    'id': self.make_id('skimmer', data),
+                    'data': {'alert': 'Possible Track1 magnetic stripe data', 'masked_pan': masked}
+                }
+                if allow_sensitive:
+                    out['data']['payload_hex'] = data.hex()
+                return out
+        except Exception:
+            return None
         return None
 
 class MedRadioDecoder(BaseDecoder):
-    """Heuristic decoder that flags any signal using the MedRadio config."""
-    def decode(self, data, radio_config):
-        if radio_config == 'FSK_MANCHESTER_MEDRADIO':
-            return {'protocol': '!!! MedRadio Signal !!!', 'id': f'medradio-{hashlib.sha1(data).hexdigest()[:8]}', 'data': {'alert': 'Signal matching MedRadio physical layer detected. Do not log payload.', 'payload_len': len(data)}}
+    """Flag MedRadio physical-layer shows up. Always sensitive: do not include payloads."""
+    sensitive = True
+    name = "MedRadio"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if radio_config and 'MEDRADIO' in radio_config.upper():
+            return {
+                'protocol': 'MedRadio (physical-layer match)',
+                'id': self.make_id('medradio', data),
+                'data': {'alert': 'MedRadio physical layer detected. Payload suppressed for privacy.' , 'payload_len': len(data)}
+            }
         return None
 
 class DigitalSignalBurstDecoder(BaseDecoder):
-    """
-    Identifies short, high-entropy digital bursts characteristic of signals like
-    MDC-1200, Fleetsync, or other public safety data transmissions.
-    """
-    def decode(self, data, radio_config):
-        if 'FSK' not in radio_config or not (2 <= len(data) <= 16):
+    """Detect short, moderately high-entropy bursts typical of IDs or short data frames."""
+    name = "DigitalSignalBurst"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if not radio_config or 'FSK' not in radio_config.upper():
             return None
-        suspicion_score = 0
+        if not (2 <= len(data) <= 32):
+            return None
+
         entropy = _calculate_entropy(data)
-        if entropy > 3.0: suspicion_score += 40
-        if len(set(data)) > len(data) / 2: suspicion_score += 30
-        if len(data) not in [4, 8]: suspicion_score += 20
-        if all(b == 0x00 for b in data) or all(b == 0xFF for b in data): suspicion_score = 0
-        if suspicion_score >= 60:
-            return {'protocol': 'Digital Data Burst (Public Safety?)', 'id': f'burst-{hashlib.sha1(data).hexdigest()[:8]}', 'data': {'alert': 'High-entropy FSK packet detected.', 'score': suspicion_score, 'entropy': round(entropy, 2), 'payload_hex': data.hex()}}
+        score = 0
+        if entropy > 3.0:
+            score += 40
+        if len(set(data)) > len(data)/2:
+            score += 30
+        if len(data) not in (4,8,12,16):
+            score += 15
+        if all(b == 0x00 for b in data) or all(b == 0xFF for b in data):
+            score = 0
+
+        if score >= 60:
+            out = {
+                'protocol': 'DigitalSignalBurst',
+                'id': self.make_id('burst', data),
+                'data': {'alert': 'High-entropy FSK packet', 'score': score, 'entropy': round(entropy,2)}
+            }
+            # Small hex okay to include for analysis; allow_sensitive only affects high-PII decoders
+            out['data']['payload_hex'] = data.hex()
+            return out
         return None
 
 class GPSTrackerDecoder(BaseDecoder):
-    """Looks for NMEA-formatted GPS data sentences."""
-    def decode(self, data, radio_config):
+    """Detects NMEA sentences; this reveals location so it's treated as semi-sensitive."""
+    sensitive = True
+    name = "GPSTracker"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
         try:
             text = data.decode('ascii', errors='ignore')
-            # Look for a common NMEA sentence like $GPRMC
-            gprmc_match = re.search(r'\$GPRMC,(\d{6}\.\d{2}),A,(\d{4}\.\d{4}),([NS]),(\d{5}\.\d{4}),([EW])', text)
-            if gprmc_match:
-                lat_raw, lat_dir, lon_raw, lon_dir = gprmc_match.group(2, 3, 4, 5)
-                lat = round(float(lat_raw[:2]) + float(lat_raw[2:]) / 60, 6) * (1 if lat_dir == 'N' else -1)
-                lon = round(float(lon_raw[:3]) + float(lon_raw[3:]) / 60, 6) * (1 if lon_dir == 'E' else -1)
-                return {'protocol': 'GPS Tracker (NMEA)', 'id': f'gps-nmea-{hashlib.sha1(data).hexdigest()[:8]}', 'data': {'latitude': lat, 'longitude': lon}}
-        except: return None
+            # find GPRMC or GPGGA with numeric coordinates
+            gprmc = re.search(r'\$GPRMC,(\d{6}\.\d{2}),[AV],(\d{4}\.\d+),([NS]),(\d{5}\.\d+),([EW])', text)
+            if gprmc:
+                # convert lat/lon
+                time_str = gprmc.group(1)
+                lat_raw = gprmc.group(2); lat_dir = gprmc.group(3)
+                lon_raw = gprmc.group(4); lon_dir = gprmc.group(5)
+                lat = (float(lat_raw[:2]) + float(lat_raw[2:]) / 60.0) * (1 if lat_dir == 'N' else -1)
+                lon = (float(lon_raw[:3]) + float(lon_raw[3:]) / 60.0) * (1 if lon_dir == 'E' else -1)
+                out = {
+                    'protocol': 'GPS (NMEA)',
+                    'id': self.make_id('gps', data),
+                    'data': {'latitude': round(lat,6), 'longitude': round(lon,6)}
+                }
+                if allow_sensitive:
+                    out['data']['raw'] = text.strip()
+                return out
+        except Exception:
+            return None
         return None
 
 class TPMSDecoder(BaseDecoder):
-    """Decodes common Tire Pressure Monitoring System (TPMS) packets."""
-    def decode(self, data, radio_config):
-        # Many TPMS sensors (like Schrader) use a 9-byte packet
+    """Basic heuristic for a common 9-byte TPMS layout (very heuristic)."""
+    name = "TPMS"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if 'FSK' not in (radio_config or '').upper():
+            return None
         if len(data) != 9:
             return None
         try:
-            # A common format is a 4-byte ID, pressure, temp, status, and checksum
             sensor_id = data[0:4].hex().upper()
-            pressure_kpa = data[4] * 2.5 # Example conversion
-            temp_c = data[5] - 40       # Example conversion
+            pressure_kpa = data[4] * 2.5
+            temp_c = data[5] - 40
             status = data[6]
             checksum = data[8]
-            calculated_checksum = sum(data[0:8]) & 0xFF
-            if checksum == calculated_checksum:
-                return {
-                    'protocol': 'TPMS (Tire Sensor)',
-                    'id': f'tpms-{sensor_id}',
-                    'data': {'pressure_kpa': pressure_kpa, 'temperature_C': temp_c, 'status': hex(status)}
-                }
-        except: return None
-        return None
+            calc = sum(data[0:8]) & 0xFF
+            if checksum != calc:
+                return None
+            return {
+                'protocol': 'TPMS',
+                'id': f"tpms-{sensor_id}",
+                'data': {'pressure_kpa': round(pressure_kpa,1), 'temperature_C': temp_c, 'status': hex(status)}
+            }
+        except Exception:
+            return None
 
 class WirelessAlarmSensorDecoder(BaseDecoder):
-    """Decodes common wireless alarm sensor packets (e.g., Honeywell 5800 series)."""
-    def decode(self, data, radio_config):
-        # Honeywell 5800 series packets are often 6 bytes
-        if len(data) != 6:
+    """Common ASK/OOK household sensors (heuristic)."""
+    name = "WirelessAlarmSensor"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if 'OOK' not in (radio_config or '').upper():
+            return None
+        if len(data) not in (6,7):
             return None
         try:
-            # Format: Preamble, Sensor ID (3 bytes), Status, CRC
             sensor_id = data[1:4].hex().upper()
             status = data[4]
-            # Bit flags in the status byte are important
-            is_tripped = (status & 0b00000100) > 0
-            low_battery = (status & 0b00001000) > 0
-            # A real implementation would have a proper CRC check here
+            is_tripped = bool(status & 0b00000100)
+            low_batt = bool(status & 0b00001000)
             return {
-                'protocol': 'Wireless Alarm Sensor',
-                'id': f'alarm-{sensor_id}',
-                'data': {'tripped': is_tripped, 'low_battery': low_battery, 'status_byte': hex(status)}
+                'protocol': 'WirelessAlarmSensor',
+                'id': f"alarm-{sensor_id}",
+                'data': {'tripped': is_tripped, 'low_battery': low_batt, 'status_byte': hex(status)}
             }
-        except: return None
-        return None
+        except Exception:
+            return None
 
 class Acurite5n1Decoder(BaseDecoder):
-    """Decodes packets from Acurite 5-in-1 Weather Stations."""
-    def decode(self, data, radio_config):
-        if len(data) != 7: return None
+    """Acurite 5-in-1 weather station (heuristic, with checksum)."""
+    name = "Acurite5n1"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if len(data) != 7:
+            return None
         try:
             sensor_id = (data[0] << 8) | data[1]
             temp_raw = ((data[3] & 0x0F) << 7) | (data[4] & 0x7F)
             temperature_C = (temp_raw - 400) / 10.0
             humidity = data[5] & 0x7F
-            if sum(data[0:6]) & 0xFF != data[6]: return None
-            return {'protocol': 'Acurite 5n1 Weather', 'id': f'acurite-{sensor_id}', 'data': {'temperature_C': round(temperature_C, 1), 'humidity': humidity}}
-        except: return None
+            if (sum(data[0:6]) & 0xFF) != data[6]:
+                return None
+            return {'protocol': 'Acurite5n1', 'id': f'acurite-{sensor_id}', 'data': {'temperature_C': round(temperature_C,1), 'humidity': humidity}}
+        except Exception:
+            return None
 
 class POCSAGDecoder(BaseDecoder):
-    """Heuristic decoder for POCSAG pager messages."""
-    def decode(self, data, radio_config):
+    """Heuristic POCSAG pager content detector (returns message text)."""
+    name = "POCSAG"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
         try:
             text = data.decode('ascii', errors='ignore')
-            printable_chars = sum(1 for c in text if c.isprintable() or c in '\r\n\t')
-            if len(text) > 8 and (printable_chars / len(text)) > 0.7:
-                return {'protocol': 'POCSAG Pager (Likely)', 'id': f'pocsag-{hashlib.sha1(data).hexdigest()[:8]}', 'data': {'message': text.strip()}}
-        except: return None
+            printable = sum(1 for c in text if c.isprintable() or c in '\r\n\t')
+            if len(text) > 8 and (printable/len(text) > 0.7) and any(ch.isdigit() for ch in text):
+                return {'protocol': 'POCSAG', 'id': self.make_id('pocsag', data), 'data': {'message': text.strip()}}
+        except Exception:
+            return None
         return None
 
 class ImplantHeartbeatDecoder(BaseDecoder):
-    """Heuristic decoder for suspicious short packets that could be heartbeats."""
-    def decode(self, data, radio_config):
-        # Refined rule: Check for short packets with LOW entropy. A simple ID is not random.
+    """Short low-entropy pings that may indicate a periodic beacon."""
+    name = "ImplantHeartbeat"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
         if 2 <= len(data) <= 8:
-            entropy = _calculate_entropy(data)
-            if entropy < 2.5: # Low entropy suggests a simple, repeating ID
-                return {'protocol': 'Suspicious Heartbeat (Implant?)', 'id': f'implant-ping-{hashlib.sha1(data).hexdigest()[:8]}', 'data': {'alert': 'Short, low-entropy packet detected. Monitor for periodicity.', 'entropy': round(entropy, 2), 'payload_hex': data.hex()}}
+            ent = _calculate_entropy(data)
+            if ent < 2.5:
+                return {'protocol': 'ImplantHeartbeat', 'id': self.make_id('implant', data), 'data': {'alert': 'Low-entropy short packet', 'entropy': round(ent,2), 'payload_hex': data.hex()}}
         return None
 
 class GenericDecoder(BaseDecoder):
-    """A fallback decoder for unknown protocols."""
-    def decode(self, data, radio_config):
-        if not data: return None
+    """Fallback for any payloads not recognized by other decoders."""
+    name = "Generic"
+
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if not data:
+            return None
         return {'protocol': 'Unknown', 'id': f'unknown-{hashlib.sha1(data[:8]).hexdigest()[:10]}', 'data': {'payload_len': len(data), 'payload_hex': data.hex()}}
 
-# --- The main pipeline. More specific decoders are placed first. ---
-DECODER_PIPELINE = [
+# Ordered pipeline: specific -> generic last
+DECODER_PIPELINE: List[BaseDecoder] = [
     CreditCardSkimmerDecoder(),
     MedRadioDecoder(),
     DigitalSignalBurstDecoder(),
@@ -168,6 +263,5 @@ DECODER_PIPELINE = [
     Acurite5n1Decoder(),
     POCSAGDecoder(),
     ImplantHeartbeatDecoder(),
-    GenericDecoder(), # Always last
+    GenericDecoder(),
 ]
-
