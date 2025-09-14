@@ -1,0 +1,15 @@
+[Unit]
+Description=Robust Sub-GHz Scanner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/rf_scanner/robust_scanner.py
+WorkingDirectory=/home/pi/rf_scanner
+Restart=always
+User=pi
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
