@@ -1,2 +1,2 @@
 requests
-python-manchester-code
+manchester-code
