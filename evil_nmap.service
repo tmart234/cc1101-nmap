@@ -1,15 +1,17 @@
 [Unit]
-Description=Robust Sub-GHz Scanner
-After=network-online.target
-Wants=network-online.target
+Description=EvilCrow RF Scanner Service
+After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/pi/rf_scanner/robust_scanner.py
-WorkingDirectory=/home/pi/rf_scanner
-Restart=always
+Type=simple
 User=pi
-StandardOutput=journal
-StandardError=journal
+WorkingDirectory=/opt/evilcrow
+ExecStart=/opt/evilcrow/venv/bin/python /opt/evilcrow/evilcrow_scanner.py --interval 900 --ip 192.168.4.1 --freqs 433,915,315,868,405
+Restart=on-failure
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=evilcrow
 
 [Install]
 WantedBy=multi-user.target
