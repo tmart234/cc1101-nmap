@@ -33,7 +33,6 @@ def _calculate_entropy(data: bytes) -> float:
     """Calculates the Shannon entropy of a byte string."""
     if not data:
         return 0.0
-    # FIXED: More efficient entropy calculation using collections.Counter
     counts = Counter(data)
     length = len(data)
     return -sum((c / length) * math.log2(c / length) for c in counts.values())
@@ -52,8 +51,7 @@ class BaseDecoder:
     def make_id(prefix: str, data: bytes, length: int = 8) -> str:
         return f"{prefix}-{hashlib.sha1(data).hexdigest()[:length]}"
 
-# --- Full Decoder Pipeline (Restored & Refined) ---
-# Simplified: Removed redundant try/except blocks
+# --- Full Decoder Pipeline ---
 class CreditCardSkimmerDecoder(BaseDecoder):
     sensitive, name = True, "CreditCardSkimmer"
     def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
@@ -81,36 +79,23 @@ class MedRadioDecoder(BaseDecoder):
             decoded_info = {}
             if manchester_decode:
                 try:
-                    # FIXED: Create a list of strings '0'/'1' for the decoder library
                     bitlist = [bit for b in data for bit in f"{b:08b}"]
                     decoded_bits = manchester_decode(bitlist)
-                    
-                    # FIXED: Correctly handle list output from manchester_decode
                     if isinstance(decoded_bits, list):
                         preview = "".join(str(b) for b in decoded_bits[:64])
-                        if len(decoded_bits) > 64:
-                            preview += "..."
+                        if len(decoded_bits) > 64: preview += "..."
                         decoded_info['decoded_bits_preview'] = preview
-                    else:
-                        decoded_info['decoded_bits'] = str(decoded_bits)
-                except Exception:
-                    decoded_info['decoding_error'] = 'Manchester decoding failed'
-            else:
-                # FIXED: Gracefully handle missing library
-                decoded_info['note'] = "Manchester decode unavailable"
-            
-            return {
-                "protocol": "MedRadio", "id": self.make_id("medradio", data),
-                "data": {"alert": "MedRadio physical layer detected. Payload suppressed.", "payload_len": len(data), **decoded_info},
-            }
+                    else: decoded_info['decoded_bits'] = str(decoded_bits)
+                except Exception: decoded_info['decoding_error'] = 'Manchester decoding failed'
+            else: decoded_info['note'] = "Manchester decode unavailable"
+            return {"protocol": "MedRadio", "id": self.make_id("medradio", data), "data": {"alert": "MedRadio physical layer detected.", "payload_len": len(data), **decoded_info}}
         return None
 
 class DigitalSignalBurstDecoder(BaseDecoder):
     name = "DigitalSignalBurst"
     def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
         if not radio_config or "FSK" not in radio_config.upper() or not (2 <= len(data) <= 32): return None
-        entropy = _calculate_entropy(data)
-        score = 0
+        entropy, score = _calculate_entropy(data), 0
         if entropy > 3.0: score += 40
         if len(set(data)) > len(data) / 2: score += 30
         if len(data) not in (4, 8, 12, 16): score += 15
@@ -123,28 +108,25 @@ class GPSTrackerDecoder(BaseDecoder):
     sensitive, name = True, "GPSTracker"
     def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
         text = data.decode("ascii", errors="ignore")
-        gprmc = re.search(r"\$GPRMC,(\d{6}\.\d{2}),[AV],(\d{4}\.\d+),([NS]),(\d{5}\.\d+),([EW])", text)
-        if gprmc:
-            lat_raw, lat_dir, lon_raw, lon_dir = gprmc.group(2, 3, 4, 5)
-            lat = (float(lat_raw[:2]) + float(lat_raw[2:]) / 60.0) * (1 if lat_dir == "N" else -1)
-            lon = (float(lon_raw[:3]) + float(lon_raw[3:]) / 60.0) * (1 if lon_dir == "E" else -1)
-            out = {"protocol": "GPS (NMEA)", "id": self.make_id("gps", data), "data": {"latitude": round(lat, 6), "longitude": round(lon, 6)}}
-            if allow_sensitive: out["data"]["raw"] = text.strip()
-            return out
+        nmea = re.search(r"\$G[PNGA][A-Z]{2},.*?(?:\r\n|\n|$)", text)
+        if nmea:
+            gprmc = re.search(r",(\d{4}\.\d+),([NS]),(\d{5}\.\d+),([EW])", nmea.group(0))
+            if gprmc:
+                lat_raw, lat_dir, lon_raw, lon_dir = gprmc.groups()
+                lat = (float(lat_raw[:2]) + float(lat_raw[2:]) / 60.0) * (1 if lat_dir == "N" else -1)
+                lon = (float(lon_raw[:3]) + float(lon_raw[3:]) / 60.0) * (1 if lon_dir == "E" else -1)
+                out = {"protocol": "GPS (NMEA)", "id": self.make_id("gps", data), "data": {"latitude": round(lat, 6), "longitude": round(lon, 6)}}
+                if allow_sensitive: out["data"]["raw"] = text.strip()
+                return out
         return None
 
 class TPMSDecoder(BaseDecoder):
     name = "TPMS"
     def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
         if 'FSK' not in (radio_config or '').upper() or len(data) != 9: return None
-        # Simple checksum validation is a good guard
         if sum(data[0:8]) & 0xFF != data[8]: return None
-        
         sensor_id = data[0:4].hex().upper()
-        pressure_kpa = data[4] * 2.5
-        temp_c = data[5] - 40
-        status = data[6]
-        return {'protocol': 'TPMS', 'id': f"tpms-{sensor_id}", 'data': {'pressure_kpa': round(pressure_kpa,1), 'temperature_C': temp_c, 'status': hex(status)}}
+        return {'protocol': 'TPMS', 'id': f"tpms-{sensor_id}", 'data': {'pressure_kpa': round(data[4] * 2.5,1), 'temperature_C': data[5] - 40, 'status': hex(data[6])}}
 
 class WirelessAlarmSensorDecoder(BaseDecoder):
     name = "WirelessAlarmSensor"
@@ -165,9 +147,45 @@ class Acurite5n1Decoder(BaseDecoder):
 class POCSAGDecoder(BaseDecoder):
     name = "POCSAG"
     def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        # Improved: Look for the common preamble first
+        if b"\x55\x55\x55" in data:
+            return {'protocol': 'POCSAG (Preamble Match)', 'id': self.make_id('pocsag', data), 'data': {'payload_len': len(data)}}
         text = data.decode('ascii', errors='ignore')
         if len(text) > 8 and (sum(1 for c in text if c.isprintable() or c in '\r\n\t') / len(text) > 0.7) and any(ch.isdigit() for ch in text):
-            return {'protocol': 'POCSAG', 'id': self.make_id('pocsag', data), 'data': {'message': text.strip()}}
+            return {'protocol': 'POCSAG (Content Match)', 'id': self.make_id('pocsag', data), 'data': {'message': text.strip()}}
+        return None
+
+class RollingCodeDecoder(BaseDecoder):
+    name = "RollingCode"
+    sensitive = True
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if 'OOK' not in (radio_config or '').upper() or not (4 <= len(data) <= 16): return None
+        bits = "".join(f"{byte:08b}" for byte in data)
+        # Heuristic: looks for short, non-random repeating patterns typical of fixed-code remotes.
+        for size in range(24, 65, 8):
+            pattern = bits[:size]
+            if pattern and len(bits) > size and not pattern.count('0') == size and not pattern.count('1') == size:
+                if bits.startswith(pattern * 2):
+                    return {"protocol": "Fixed-Code Remote", "id": self.make_id("fixedcode", data), "data": {"alert": "Replayable fixed-code pattern detected", "pattern": pattern[:32] + "..."}}
+        return None
+
+class TrackerBeaconDecoder(BaseDecoder):
+    name = "TrackerBeacon"
+    sensitive = True
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        if not (8 <= len(data) <= 32): return None
+        entropy = _calculate_entropy(data)
+        if 1.5 < entropy < 4.0:
+            return {"protocol": "TrackerBeacon (Non-GPS)", "id": self.make_id("beacon", data), "data": {"alert": "Possible tracker beacon detected", "length": len(data), "entropy": round(entropy, 2)}}
+        return None
+
+class SpyBugDecoder(BaseDecoder):
+    name = "SpyBug"
+    sensitive = True
+    def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
+        # Heuristic: A long capture with very low entropy could be an unmodulated carrier or simple FSK tone.
+        if len(data) > 128 and _calculate_entropy(data) < 2.0:
+            return {"protocol": "Possible Audio Bug", "id": self.make_id("spybug", data), "data": {"alert": "Long, low-entropy signal detected. Could be an analog bug.", "length": len(data)}}
         return None
 
 class ImplantHeartbeatDecoder(BaseDecoder):
@@ -186,7 +204,8 @@ class GenericDecoder(BaseDecoder):
 DECODER_PIPELINE: List[BaseDecoder] = [
     CreditCardSkimmerDecoder(), MedRadioDecoder(), DigitalSignalBurstDecoder(),
     GPSTrackerDecoder(), TPMSDecoder(), WirelessAlarmSensorDecoder(), Acurite5n1Decoder(),
-    POCSAGDecoder(), ImplantHeartbeatDecoder(), # GenericDecoder is now handled as a fallback
+    POCSAGDecoder(), RollingCodeDecoder(), TrackerBeaconDecoder(), SpyBugDecoder(),
+    ImplantHeartbeatDecoder(), # GenericDecoder is now handled as a fallback
 ]
 
 # --- EvilCrow Client ---
@@ -281,8 +300,7 @@ def get_scan_configs(freqs: List[int]) -> List[Dict[str, Any]]:
         configs.append({"name": "FSK_MANCHESTER_MEDRADIO", "freq": 405})
     return configs
 
-
-def process_packet(payload: bytes, rssi: int, lqi: int, config_name: str, allow_sensitive: bool):
+def process_packet(payload: bytes, rssi: int, lqi: int, config_name: str, allow_sensitive: bool, args: argparse.Namespace):
     global known_devices
     if not payload: return
 
@@ -295,9 +313,8 @@ def process_packet(payload: bytes, rssi: int, lqi: int, config_name: str, allow_
                 matched_decoder = decoder
                 break
         except Exception as e:
-            logging.error(f"Decoder {decoder.name} failed: {e}", exc_info=True)
+            logging.log(logging.DEBUG if args.verbose else logging.ERROR, f"Decoder {decoder.name} failed: {e}", exc_info=args.verbose)
 
-    # FIXED: Only run GenericDecoder if no other decoder matched.
     if not result:
         matched_decoder = GenericDecoder()
         result = matched_decoder.decode(payload, config_name, allow_sensitive)
@@ -323,14 +340,12 @@ def print_device_report(device_id: str, allow_sensitive: bool):
     if not device: return
     
     report_detections = []
-    # FIXED: Use the 'is_sensitive' flag instead of a hardcoded list
     device_is_sensitive = device.get('is_sensitive', False)
     for det in device.get("detections", []):
         data_copy = det.get('data', {}).copy()
         if not allow_sensitive and device_is_sensitive:
-            data_copy.pop('payload_hex', None)
-            data_copy.pop('raw', None)
-            data_copy.pop('decoded_bits_preview', None)
+            for field in ('payload_hex', 'raw', 'decoded_bits_preview', 'message'):
+                data_copy.pop(field, None)
         report_detections.append(data_copy)
 
     report = {
@@ -390,11 +405,12 @@ def main(args):
                         crow.set_radio_config(analyst, cfg)
                         payload, rssi, lqi = crow.receive_packet(analyst)
                         if payload:
-                            process_packet(payload, rssi, lqi, cfg["name"], args.allow_sensitive)
+                            process_packet(payload, rssi, lqi, cfg["name"], args.allow_sensitive, args)
                     except Exception as e:
                         logging.warning(f"Error during analysis {cfg['name']}: {e}")
         else:
-            logging.info("No activity detected this cycle.")
+            if not args.quiet:
+                logging.info("No activity detected this cycle.")
 
         check_for_gone_devices(args.interval)
         logging.info(f"Cycle complete. {len(known_devices)} devices tracked.")
@@ -408,15 +424,17 @@ if __name__ == "__main__":
     parser.add_argument("--freqs", type=str, default="433,915,315,868,405", help="Comma-separated freqs in MHz")
     parser.add_argument("--allow-sensitive", action="store_true", help="Display sensitive payloads (credit card, medradio, gps)")
     parser.add_argument("--rssi-threshold", type=float, default=-100.0, help="RSSI threshold for valid signals")
-    # ADDED: CLI args for radio roles
     parser.add_argument("--hunter-radio", type=str, default='A', choices=['A', 'B'], help='Hunter radio letter (default A).')
     parser.add_argument("--analyst-radio", type=str, default='B', choices=['A', 'B'], help='Analyst radio letter (default B).')
-    # ADDED: Verbose logging flag
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress non-essential info logging.")
     args = parser.parse_args()
 
     if args.hunter_radio == args.analyst_radio:
         parser.error("Hunter and Analyst radios cannot be the same.")
+    
+    if args.quiet:
+        logging.getLogger().setLevel(logging.WARNING) # Suppress INFO logs
 
     try:
         main(args)
