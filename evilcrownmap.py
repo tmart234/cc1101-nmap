@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from typing import Tuple, Optional, Dict, Any, List
 from collections import Counter
 
-# It's good practice to manage third-party dependencies clearly.
 try:
     from manchester import decode as manchester_decode # pip install python-manchester-code
 except ImportError:
@@ -32,7 +31,6 @@ def _calculate_entropy(data: bytes) -> float:
     """Calculates the Shannon entropy of a byte string."""
     if not data:
         return 0.0
-    # FIXED: More efficient entropy calculation using collections.Counter
     counts = Counter(data)
     length = len(data)
     return -sum((c / length) * math.log2(c / length) for c in counts.values())
@@ -51,7 +49,7 @@ class BaseDecoder:
     def make_id(prefix: str, data: bytes, length: int = 8) -> str:
         return f"{prefix}-{hashlib.sha1(data).hexdigest()[:length]}"
 
-# --- Full Decoder Pipeline (Restored & Refined) ---
+# --- Full Decoder Pipeline  ---
 class CreditCardSkimmerDecoder(BaseDecoder):
     sensitive, name = True, "CreditCardSkimmer"
     def decode(self, data: bytes, radio_config: str, allow_sensitive: bool = ALLOW_SENSITIVE_BY_DEFAULT):
@@ -81,11 +79,9 @@ class MedRadioDecoder(BaseDecoder):
             decoded_info = {}
             if manchester_decode:
                 try:
-                    # FIXED: Create a list of strings '0'/'1' for the decoder library
                     bitlist = [bit for b in data for bit in f"{b:08b}"]
                     decoded_bits = manchester_decode(bitlist)
                     
-                    # FIXED: Correctly handle list output from manchester_decode
                     if isinstance(decoded_bits, list):
                         preview = "".join(str(b) for b in decoded_bits[:64])
                         if len(decoded_bits) > 64:
@@ -96,7 +92,6 @@ class MedRadioDecoder(BaseDecoder):
                 except Exception:
                     decoded_info['decoding_error'] = 'Manchester decoding failed'
             else:
-                # FIXED: Gracefully handle missing library
                 decoded_info['note'] = "Manchester decode unavailable"
             
             return {
@@ -233,7 +228,6 @@ class EvilCrow:
         return self._get("api", {"radio": radio, "command": command})
 
     def set_radio_config(self, radio: str, config: Dict[str, Any]) -> bool:
-        # FIXED: Map custom config names to firmware-supported modulation strings.
         try:
             freq_hz = int(config["freq"] * 1_000_000)
             self._send_command(f"set_freq {freq_hz}", radio)
@@ -261,7 +255,6 @@ class EvilCrow:
         out = self._send_command("rx_sniff on", radio)
         if not out: return None, None, None
         try:
-            # FIXED: Handle spaces in hex output from Evil Crow
             m_hex = re.search(r"([0-9A-Fa-f ]{4,})", out)
             m_rssi = re.search(r"RSSI[:=]?\s*(-?\d+)", out)
             m_lqi = re.search(r"LQI[:=]?\s*(\d+)", out)
@@ -315,7 +308,6 @@ def print_device_report(device_id: str, allow_sensitive: bool):
     if not device: return
     
     report_detections = []
-    # FIXED: Comprehensive sensitive data stripping
     SENSITIVE_PROTOCOLS = ('CreditCardSkimmer (Track1)', 'CreditCardSkimmer (Track2)', 'GPS (NMEA)', 'MedRadio')
     for det in device.get("detections", []):
         report_data = det.get('data', {}).copy()
@@ -330,7 +322,7 @@ def print_device_report(device_id: str, allow_sensitive: bool):
         "first_seen": datetime.fromtimestamp(device["first_seen"], tz=timezone.utc).isoformat(),
         "last_seen": datetime.fromtimestamp(device["last_seen"], tz=timezone.utc).isoformat(),
         "rssi": device.get("rssi"), "lqi": device.get("lqi"), "count": device.get("count"),
-        "config_name": device.get("config_name"), # ADDED: Report the config name
+        "config_name": device.get("config_name"),
         "data_logs": report_detections,
     }
     print(json.dumps(report, indent=2))
@@ -340,7 +332,6 @@ def check_for_gone_devices(interval: int):
     gone_timeout = interval * 2.5
     for dev_id, info in list(known_devices.items()):
         if now - info["last_seen"] > gone_timeout:
-            # FIXED: Include protocol name in "gone" message
             logging.info(f"DEVICE GONE: {info.get('protocol')} ({dev_id}), last seen {int(now - info['last_seen'])}s ago")
             del known_devices[dev_id]
 
@@ -397,7 +388,6 @@ if __name__ == "__main__":
     parser.add_argument("--ip", type=str, default="192.168.4.1", help="Evil Crow IP")
     parser.add_argument("--freqs", type=str, default="433,915,315,868,405", help="Comma-separated freqs in MHz")
     parser.add_argument("--allow-sensitive", action="store_true", help="Display sensitive payloads (credit card, medradio, gps)")
-    # FIXED: Default RSSI threshold changed for better sensitivity with Evil Crow
     parser.add_argument("--rssi-threshold", type=float, default=-100.0, help="RSSI threshold for valid signals")
     args = parser.parse_args()
     try:
