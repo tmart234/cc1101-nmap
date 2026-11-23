@@ -1,0 +1,370 @@
+{
+  "version": 1,
+  "notes": "Real-world sub-GHz emitters a CC1101 can observe. 'detect' is how: decode = protocol decoded and checksum-verified; pulses = demodulated pulses seen, identified by band only; energy = RSSI sweep only (content not demodulated). 'role': mobile/device = a transmitter whose signal strength says how close it is; base = fixed infrastructure (tower, repeater) that only says a system is in range. eirp_dbm is a typical radiated power used for rough distance estimates. Bands follow current US (FCC) and EU/CEPT allocations.",
+  "entries": [
+    {
+      "id": "ps-800-npspac-mobile", "category": "public_safety", "regions": ["US"],
+      "name": "Public-safety radio transmitting (800 MHz NPSPAC)",
+      "ranges_mhz": [[806.0, 809.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 37, "alert": true,
+      "meaning": "A police, fire or EMS radio (handheld or vehicle) is keying up. 806-809 MHz is the mobile-transmit half of the NPSPAC band, licensed only to public safety; it carries mutual-aid/interop channels (8CALL90/8TAC91-94 at 806.0125-806.5125 MHz) and many county/state trunked systems.",
+      "caveats": "Energy only: P25/analog/DMR content is not demodulated, so police vs fire vs EMS can't be told apart without your local frequency list (--local-freqs).",
+      "sweep": {"step_khz": 100, "rxbw_khz": 102}
+    },
+    {
+      "id": "ps-800-mobile", "category": "public_safety", "regions": ["US"],
+      "name": "Trunked/conventional radio transmitting (800 MHz)",
+      "ranges_mhz": [[809.0, 816.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 37, "alert": true,
+      "meaning": "A handheld or vehicle radio is transmitting to an 800 MHz repeater or trunked site. Most county/city P25 systems for police, fire and EMS live here, shared with utilities, transit and business users.",
+      "caveats": "Shared band. Add your county's system (RadioReference) via --local-freqs to label channels exactly.",
+      "sweep": {"step_khz": 100, "rxbw_khz": 102}
+    },
+    {
+      "id": "ps-700-mobile", "category": "public_safety", "regions": ["US"],
+      "name": "Public-safety radio transmitting (700 MHz)",
+      "ranges_mhz": [[799.0, 805.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 37, "alert": true,
+      "meaning": "A state/local public-safety radio is transmitting. 799-805 MHz is the mobile-transmit side of the 700 MHz narrowband public-safety band (paired with 769-775 MHz) and is licensed only to public-safety agencies.",
+      "caveats": "Energy only; agency not identifiable without --local-freqs.",
+      "sweep": {"step_khz": 100, "rxbw_khz": 102}
+    },
+    {
+      "id": "firstnet-b14-ul", "category": "cellular", "regions": ["US"],
+      "name": "FirstNet / AT&T Band 14 LTE device transmitting",
+      "ranges_mhz": [[788.0, 798.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
+      "meaning": "An LTE device on Band 14 is transmitting: FirstNet (first-responder phones, vehicle routers in patrol cars and engines) or an ordinary AT&T customer, since AT&T carries commercial traffic on Band 14.",
+      "caveats": "Weak indicator of first responders on its own; strongest when it coincides with 700/800 MHz public-safety radio activity.",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "ps-800-base", "category": "public_safety", "regions": ["US"],
+      "name": "800 MHz trunked radio site (tower) in range",
+      "ranges_mhz": [[851.0, 861.0]], "detect": "energy", "role": "base", "eirp_dbm": 50, "alert": false,
+      "meaning": "Repeater/trunked-site transmitters. Control channels transmit continuously; voice channels light up whenever anyone on the system talks, wherever they are. Shows which systems cover you, not who is nearby.",
+      "caveats": "Not a proximity signal - use the 806-816 MHz mobile-transmit entries for that.",
+      "sweep": {"step_khz": 250, "rxbw_khz": 270}
+    },
+    {
+      "id": "ps-700-base", "category": "public_safety", "regions": ["US"], "extended": true,
+      "name": "700 MHz public-safety site (tower) in range",
+      "ranges_mhz": [[769.0, 775.0]], "detect": "energy", "role": "base", "eirp_dbm": 50, "alert": false,
+      "meaning": "Base/repeater side of the 700 MHz public-safety band.",
+      "caveats": "Below the CC1101's specified 779 MHz limit; needs --extended-range and sensitivity is reduced.",
+      "sweep": {"step_khz": 100, "rxbw_khz": 102}
+    },
+    {
+      "id": "tetra-eu-ul", "category": "public_safety", "regions": ["EU"], "extended": true,
+      "name": "Emergency-services TETRA radio transmitting",
+      "ranges_mhz": [[380.0, 385.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 33, "alert": true,
+      "meaning": "A police, fire or ambulance TETRA terminal (handheld or vehicle) is transmitting. 380-385 MHz is the terminal-transmit half of the harmonised European emergency-services band (BOS-Digitalfunk, Airwave, C2000, RAKEL, ASTRID...). Terminals also send short registration bursts when idle.",
+      "caveats": "Below the CC1101's specified 387 MHz limit; needs --extended-range. TDMA bursts are short, so a fast sweep helps.",
+      "sweep": {"step_khz": 100, "rxbw_khz": 102}
+    },
+    {
+      "id": "tetra-eu-dl", "category": "public_safety", "regions": ["EU"],
+      "name": "Emergency-services TETRA base station in range",
+      "ranges_mhz": [[390.0, 395.0]], "detect": "energy", "role": "base", "eirp_dbm": 50, "alert": false,
+      "meaning": "TETRA base stations of the emergency-services network. Continuous carriers; shows coverage, not proximity.",
+      "caveats": "",
+      "sweep": {"step_khz": 250, "rxbw_khz": 270}
+    },
+    {
+      "id": "federal-lmr", "category": "government", "regions": ["US"],
+      "name": "Federal government radio transmitting (406-420 MHz)",
+      "ranges_mhz": [[406.1, 420.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 37, "alert": true,
+      "meaning": "The 406.1-420 MHz band is reserved for US federal users: law enforcement (FBI, DHS/ICE/CBP, US Marshals, Secret Service), military, park rangers and other agencies.",
+      "caveats": "Many non-police federal users too; much of it encrypted. Energy only.",
+      "sweep": {"step_khz": 200, "rxbw_khz": 203}
+    },
+    {
+      "id": "uhf-lmr", "category": "two_way_radio", "regions": ["US"],
+      "name": "UHF two-way radio transmitting (450-470 MHz)",
+      "ranges_mhz": [[450.0, 462.5375], [462.7375, 467.5375], [467.7375, 470.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 37, "alert": false,
+      "meaning": "Conventional UHF radio: some police/fire departments, schools, security guards, construction, hospitals, retail. Repeater outputs are mostly 451-454 and 460-462 MHz, mobile inputs 456-459 and 465-467 MHz.",
+      "caveats": "Very mixed band; label your local agencies with --local-freqs. Above 464 MHz needs --extended-range.",
+      "sweep": {"step_khz": 200, "rxbw_khz": 203}
+    },
+    {
+      "id": "frs-gmrs", "category": "two_way_radio", "regions": ["US"],
+      "name": "FRS/GMRS walkie-talkie",
+      "ranges_mhz": [[462.5375, 462.7375], [467.5375, 467.7375]], "detect": "energy", "role": "mobile", "eirp_dbm": 30, "alert": false,
+      "meaning": "Consumer walkie-talkies (FRS channels 1-22, GMRS). Common with families, events, hunters, security staff.",
+      "caveats": "467 MHz channels need --extended-range.",
+      "sweep": {"step_khz": 25, "rxbw_khz": 58}
+    },
+    {
+      "id": "rail-eot", "category": "transport", "regions": ["US"],
+      "name": "Freight train end-of-train device",
+      "ranges_mhz": [[452.925, 452.95], [457.925, 457.95]], "detect": "energy", "role": "device", "eirp_dbm": 33, "alert": false,
+      "meaning": "End-of-train (EOT) units on the last car report brake-line pressure to the locomotive on 452.9375 MHz (locomotive replies on 457.9375). A strong signal means a train is passing close by.",
+      "caveats": "",
+      "sweep": {"step_khz": 25, "rxbw_khz": 58}
+    },
+    {
+      "id": "pmr446", "category": "two_way_radio", "regions": ["EU"],
+      "name": "PMR446 walkie-talkie",
+      "ranges_mhz": [[446.0, 446.2]], "detect": "energy", "role": "mobile", "eirp_dbm": 27, "alert": false,
+      "meaning": "Licence-free consumer walkie-talkies (500 mW).",
+      "caveats": "",
+      "sweep": {"step_khz": 25, "rxbw_khz": 58}
+    },
+    {
+      "id": "ham-70cm", "category": "amateur", "regions": ["US", "EU"],
+      "name": "Amateur radio (70 cm band)",
+      "ranges_mhz": [[420.0, 433.0], [435.0, 450.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 37, "alert": false,
+      "meaning": "Licensed amateur operators, repeaters and satellites. In Europe the band is 430-440 MHz.",
+      "caveats": "",
+      "sweep": null
+    },
+    {
+      "id": "paging-us", "category": "paging", "regions": ["US"], "extended": true,
+      "name": "Paging transmitter (POCSAG/FLEX)",
+      "ranges_mhz": [[929.0, 932.0]], "detect": "energy", "role": "base", "eirp_dbm": 55, "alert": false,
+      "meaning": "Commercial paging networks used by hospitals, on-call staff and some fire departments. High-power towers broadcasting to pagers; bursts mean pages are going out, not that someone is near.",
+      "caveats": "Above the CC1101's specified 928 MHz limit; needs --extended-range.",
+      "sweep": {"step_khz": 200, "rxbw_khz": 203}
+    },
+    {
+      "id": "cell-850-ul", "category": "cellular", "regions": ["US"],
+      "name": "Cell phone / cellular modem transmitting (850 MHz)",
+      "ranges_mhz": [[814.0, 849.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
+      "meaning": "A phone, hotspot, car telematics unit or IoT modem is transmitting to a tower (LTE Bands 5/26, 5G n5). Phones transmit during calls and data use; a strong signal means the device is very close.",
+      "caveats": "Energy only. Lower 814-816 MHz overlaps 800 MHz land-mobile in some areas.",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "cell-b13-ul", "category": "cellular", "regions": ["US"],
+      "name": "Verizon Band 13 LTE device transmitting",
+      "ranges_mhz": [[779.0, 787.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
+      "meaning": "A Verizon LTE device is transmitting (Band 13 uplink, 777-787 MHz).",
+      "caveats": "777-779 MHz is below the CC1101's specified range.",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "cell-850-dl", "category": "cellular", "regions": ["US"],
+      "name": "Cell tower (850 MHz downlink)",
+      "ranges_mhz": [[869.0, 894.0]], "detect": "energy", "role": "base", "eirp_dbm": 60, "alert": false,
+      "meaning": "Cellular base stations. Always on.", "caveats": "", "sweep": null
+    },
+    {
+      "id": "cell-eu-800-ul", "category": "cellular", "regions": ["EU"],
+      "name": "Mobile phone transmitting (LTE 800)",
+      "ranges_mhz": [[832.0, 862.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
+      "meaning": "A phone or modem is transmitting on LTE Band 20.", "caveats": "",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "cell-eu-900-ul", "category": "cellular", "regions": ["EU"],
+      "name": "Mobile phone transmitting (GSM/LTE 900)",
+      "ranges_mhz": [[880.0, 915.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 30, "alert": false,
+      "meaning": "A phone, alarm communicator or modem is transmitting on GSM-900 / LTE Band 8.", "caveats": "",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "cell-eu-900-dl", "category": "cellular", "regions": ["EU"], "extended": true,
+      "name": "Cell tower (GSM/LTE 900 downlink)",
+      "ranges_mhz": [[925.0, 960.0]], "detect": "energy", "role": "base", "eirp_dbm": 60, "alert": false,
+      "meaning": "Cellular base stations. Always on.", "caveats": "", "sweep": null
+    },
+    {
+      "id": "lmr-900", "category": "utility", "regions": ["US"],
+      "name": "900 MHz private radio / utility broadband",
+      "ranges_mhz": [[896.0, 901.0], [935.0, 940.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 33, "alert": false,
+      "meaning": "Private land-mobile and utility private-LTE (Band 106) used by power companies, railroads and businesses. 896-901 MHz is the mobile-transmit side.",
+      "caveats": "935-940 MHz needs --extended-range.",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "lorawan-us", "category": "iot", "regions": ["US"],
+      "name": "LoRaWAN sensor or gateway (US915 sub-band 2)",
+      "ranges_mhz": [[903.8, 905.4]], "detect": "energy", "role": "device", "eirp_dbm": 20, "alert": false,
+      "meaning": "LoRaWAN uplinks on the channels used by The Things Network and Helium (903.9-905.3 MHz): parking, water-leak, asset trackers, smart-city sensors.",
+      "caveats": "LoRa chirps are not demodulated by a CC1101; detected by energy.",
+      "sweep": {"step_khz": 200, "rxbw_khz": 203}
+    },
+    {
+      "id": "meshtastic-us", "category": "iot", "regions": ["US"],
+      "name": "Meshtastic LoRa mesh node",
+      "ranges_mhz": [[906.75, 907.0]], "detect": "energy", "role": "device", "eirp_dbm": 22, "alert": false,
+      "meaning": "Off-grid messaging radios on Meshtastic's default US LongFast channel (906.875 MHz).",
+      "caveats": "Nodes on non-default channels show up as generic 915 MHz ISM activity.",
+      "sweep": {"step_khz": 250, "rxbw_khz": 270}
+    },
+    {
+      "id": "zwave-us", "category": "home_iot", "regions": ["US"],
+      "name": "Z-Wave smart-home device",
+      "ranges_mhz": [[908.32, 908.52], [915.9, 916.1]], "detect": "energy", "role": "device", "eirp_dbm": 0, "alert": false,
+      "meaning": "Z-Wave locks, switches, thermostats and sensors (Ring Alarm, SmartThings, Yale/Schlage locks) on 908.42 / 916 MHz.",
+      "caveats": "Very low power; only seen within a few tens of metres.",
+      "sweep": {"step_khz": 100, "rxbw_khz": 102}
+    },
+    {
+      "id": "ism-915-meters", "category": "utility", "regions": ["US"],
+      "name": "Smart utility meter / 915 MHz hopping network",
+      "ranges_mhz": [[910.0, 920.0]], "detect": "energy", "role": "device", "eirp_dbm": 20, "alert": false, "hopping": true,
+      "meaning": "Electric, gas and water meters (Itron ERT, Neptune R900, Landis+Gyr Gridstream, Sensus) hop across this range every few seconds. Activity on many channels at once is typical of a meter neighbourhood.",
+      "caveats": "Shares the ISM band with many other devices.",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "ism-915", "category": "iot", "regions": ["US"],
+      "name": "915 MHz ISM device",
+      "ranges_mhz": [[902.0, 928.0]], "detect": "energy", "role": "device", "eirp_dbm": 20, "alert": false,
+      "meaning": "Licence-free 902-928 MHz devices: weather stations, LoRa, Amazon Sidewalk, baby monitors, long-range drone/RC links (ExpressLRS, Crossfire), amateur 33 cm.",
+      "caveats": "Generic band match only.",
+      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+    },
+    {
+      "id": "srd-868", "category": "iot", "regions": ["EU"],
+      "name": "868 MHz SRD device",
+      "ranges_mhz": [[863.0, 870.0]], "detect": "energy", "role": "device", "eirp_dbm": 14, "alert": false,
+      "meaning": "European short-range devices: Homematic, alarm sensors, LoRaWAN, Sigfox, weather stations, smart meters.",
+      "caveats": "Generic band match only.",
+      "sweep": {"step_khz": 200, "rxbw_khz": 203}
+    },
+    {
+      "id": "lorawan-eu", "category": "iot", "regions": ["EU"],
+      "name": "LoRaWAN sensor (EU868)",
+      "ranges_mhz": [[867.0, 868.6]], "detect": "energy", "role": "device", "eirp_dbm": 14, "alert": false,
+      "meaning": "LoRaWAN uplinks on the EU868 channels (867.1-868.5 MHz).",
+      "caveats": "Shares 868.0-868.6 with many SRDs.", "sweep": null
+    },
+    {
+      "id": "zwave-eu", "category": "home_iot", "regions": ["EU"],
+      "name": "Z-Wave smart-home device",
+      "ranges_mhz": [[868.32, 868.52], [869.75, 869.95]], "detect": "energy", "role": "device", "eirp_dbm": 0, "alert": false,
+      "meaning": "Z-Wave home automation (868.42 / 869.85 MHz).", "caveats": "", "sweep": null
+    },
+    {
+      "id": "meshtastic-eu", "category": "iot", "regions": ["EU"],
+      "name": "Meshtastic LoRa mesh node",
+      "ranges_mhz": [[869.4, 869.65]], "detect": "energy", "role": "device", "eirp_dbm": 27, "alert": false,
+      "meaning": "Meshtastic default EU_868 channel (869.525 MHz).", "caveats": "", "sweep": null
+    },
+    {
+      "id": "social-alarm-eu", "category": "medical", "regions": ["EU"], "sensitive": true,
+      "name": "Social alarm / telecare pendant",
+      "ranges_mhz": [[869.2, 869.25]], "detect": "energy", "role": "device", "eirp_dbm": 10, "alert": false,
+      "meaning": "869.200-869.250 MHz is reserved for social alarms (personal emergency buttons for elderly or disabled people).",
+      "caveats": "Health-related; hidden unless --allow-sensitive.", "sweep": null
+    },
+    {
+      "id": "radiosonde", "category": "science", "regions": ["US", "EU"],
+      "name": "Weather balloon (radiosonde)",
+      "ranges_mhz": [[400.15, 406.0]], "detect": "energy", "role": "device", "eirp_dbm": 17, "alert": false,
+      "meaning": "Radiosondes launched twice daily (00/12 UTC) by weather services transmit position and readings about once per second for ~2 hours as they climb to 30 km.",
+      "caveats": "US NWS sondes mostly use 1680 MHz (out of range); 400-406 MHz is used across Europe and elsewhere. Shares the band with MedRadio.",
+      "sweep": {"step_khz": 200, "rxbw_khz": 203}
+    },
+    {
+      "id": "medradio", "category": "medical", "regions": ["US", "EU"], "sensitive": true,
+      "name": "Medical implant / body-worn device telemetry",
+      "ranges_mhz": [[401.0, 406.0]], "detect": "energy", "role": "device", "eirp_dbm": -16, "alert": false,
+      "meaning": "MedRadio/MICS: pacemakers, defibrillators, neurostimulators and their bedside monitors.",
+      "caveats": "Health-related; hidden unless --allow-sensitive. Range is only a few metres.", "sweep": null
+    },
+
+    {
+      "id": "acurite-tower", "category": "weather", "regions": ["US", "EU"],
+      "name": "Acurite temperature/humidity sensor",
+      "ranges_mhz": [[433.82, 434.02]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false, "interval_s": 18,
+      "meaning": "Acurite 592TXR/06002RM tower sensor, the outdoor sensor of most Acurite home weather displays. Reports every ~16-18 s.", "caveats": ""
+    },
+    {
+      "id": "lacrosse-tx141th", "category": "weather", "regions": ["US", "EU"],
+      "name": "LaCrosse temperature/humidity sensor",
+      "ranges_mhz": [[433.82, 434.02]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false, "interval_s": 50,
+      "meaning": "LaCrosse TX141TH-Bv2 (TFA 30.3221) outdoor sensor for LaCrosse color/forecast stations. Reports every ~50 s.", "caveats": ""
+    },
+    {
+      "id": "lacrosse-itplus", "category": "weather", "regions": ["US", "EU"],
+      "name": "LaCrosse IT+ sensor",
+      "ranges_mhz": [[868.0, 868.6], [914.0, 916.0]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false, "interval_s": 5,
+      "meaning": "LaCrosse/TFA TX29-IT, TX35-IT and TX25U thermometers. Report every ~4-6 s.", "caveats": ""
+    },
+    {
+      "id": "fineoffset-wh65", "category": "weather", "regions": ["US", "EU"],
+      "name": "Weather station outdoor array (Fine Offset WH24/WH65)",
+      "ranges_mhz": [[433.82, 434.02], [868.0, 868.6], [914.0, 916.0]], "detect": "decode", "role": "device", "eirp_dbm": 5, "alert": false, "interval_s": 16,
+      "meaning": "The all-in-one outdoor sensor sold as Ambient Weather WS-2902, Ecowitt WS69/WS2320, Misol, Froggit and others. Wind, rain, temperature, humidity, UV, light every ~16 s.", "caveats": ""
+    },
+    {
+      "id": "ambient-wh31", "category": "weather", "regions": ["US", "EU"],
+      "name": "Ambient Weather / Ecowitt indoor-outdoor sensor",
+      "ranges_mhz": [[868.0, 868.6], [914.0, 916.0]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false, "interval_s": 61,
+      "meaning": "WH31E / WH31B thermo-hygrometers used with Ambient Weather and Ecowitt consoles.", "caveats": ""
+    },
+    {
+      "id": "security-345", "category": "home_security", "regions": ["US"],
+      "name": "Alarm system sensor (Honeywell 5800 / 2GIG, 345 MHz)",
+      "ranges_mhz": [[344.8, 345.2]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false, "interval_s": 4200,
+      "meaning": "Door/window contacts, motion detectors, glass-break and smoke sensors of Honeywell/Resideo/ADT and 2GIG alarm panels. They report state changes instantly and a supervision heartbeat roughly hourly.",
+      "caveats": ""
+    },
+    {
+      "id": "security-319", "category": "home_security", "regions": ["US"],
+      "name": "Alarm system sensor (Interlogix/GE/Qolsys, 319.5 MHz)",
+      "ranges_mhz": [[319.3, 319.7]], "detect": "pulses", "role": "device", "eirp_dbm": 0, "alert": false,
+      "meaning": "Interlogix/GE/UTC Simon/Concord and Qolsys-compatible sensors transmit on 319.5 MHz.",
+      "caveats": "Not decoded yet; identified by frequency and timing structure."
+    },
+    {
+      "id": "fixed-code-remote", "category": "remote_control", "regions": ["US", "EU"],
+      "name": "Fixed-code remote / sensor (EV1527/PT2262)",
+      "ranges_mhz": [[300.0, 350.0], [387.0, 440.0], [868.0, 869.0]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false,
+      "meaning": "Very common cheap encoder chip used in wireless doorbells, PIR and door sensors, remote-controlled outlets, gate/garage openers and panic buttons. Each device has a fixed 24-bit code.",
+      "caveats": "The chip alone doesn't say which kind of product it is. Codes are redacted by default because they can be replayed."
+    },
+    {
+      "id": "vehicle-315", "category": "vehicle", "regions": ["US"],
+      "name": "Car key fob / tire-pressure sensor / garage remote (315 MHz)",
+      "ranges_mhz": [[314.0, 316.0]], "detect": "pulses", "role": "device", "eirp_dbm": -10, "alert": false,
+      "meaning": "In North America 315 MHz carries most car key fobs, tire-pressure (TPMS) sensors on passing/parked cars, and many garage-door remotes.",
+      "caveats": "Identified by band and timing; specific TPMS/fob protocols are not decoded yet."
+    },
+    {
+      "id": "garage-310-390", "category": "remote_control", "regions": ["US"],
+      "name": "Garage door remote (Chamberlain/LiftMaster/Genie)",
+      "ranges_mhz": [[309.8, 310.2], [389.8, 390.2]], "detect": "pulses", "role": "device", "eirp_dbm": -10, "alert": false,
+      "meaning": "310 and 390 MHz are used by Chamberlain/LiftMaster Security+ (with 315) and Genie garage openers.",
+      "caveats": "Rolling codes are never decoded."
+    },
+    {
+      "id": "gate-318", "category": "remote_control", "regions": ["US"],
+      "name": "Gate/garage remote (Linear MegaCode, 318 MHz)",
+      "ranges_mhz": [[317.8, 318.2]], "detect": "pulses", "role": "device", "eirp_dbm": -10, "alert": false,
+      "meaning": "Linear MegaCode remotes used for apartment, HOA and parking gates.", "caveats": ""
+    },
+    {
+      "id": "ism-433", "category": "iot", "regions": ["US", "EU"],
+      "name": "433.92 MHz device",
+      "ranges_mhz": [[433.05, 434.79]], "detect": "pulses", "role": "device", "eirp_dbm": 0, "alert": false,
+      "meaning": "The busiest licence-free band: weather sensors, wireless thermometers, doorbells, remotes, TPMS (EU and some US cars), EU car key fobs, smoke alarms, pool sensors.",
+      "caveats": "Generic band match; no decoder matched this signal."
+    },
+    {
+      "id": "wmbus-meter", "category": "utility", "regions": ["EU"],
+      "name": "Utility meter (wireless M-Bus)",
+      "ranges_mhz": [[868.8, 869.1]], "detect": "decode", "role": "device", "eirp_dbm": 14, "alert": false, "interval_s": 240,
+      "meaning": "Water, heat, gas and electricity meters and heat-cost allocators broadcasting on 868.95 MHz (modes T1/C1). Shows manufacturer, serial and meter type; readings are usually encrypted.",
+      "caveats": ""
+    }
+  ],
+
+  "rx_profiles": [
+    {"id": "ook-433", "regions": ["US", "EU"], "freq_mhz": 433.92, "mode": "ook", "rxbw_khz": 270, "drate_kbaud": 5, "dwell_s": 90, "pin": true,
+     "why": "Weather sensors, doorbells, remotes, sensors"},
+    {"id": "ook-315", "regions": ["US"], "freq_mhz": 315.0, "mode": "ook", "rxbw_khz": 270, "drate_kbaud": 5, "dwell_s": 45,
+     "why": "Key fobs, TPMS, garage remotes"},
+    {"id": "ook-345", "regions": ["US"], "freq_mhz": 345.0, "mode": "ook", "rxbw_khz": 203, "drate_kbaud": 8, "dwell_s": 60,
+     "why": "Honeywell/2GIG alarm sensors"},
+    {"id": "ook-319", "regions": ["US"], "freq_mhz": 319.5, "mode": "ook", "rxbw_khz": 203, "drate_kbaud": 5, "dwell_s": 30,
+     "why": "Interlogix/GE alarm sensors"},
+    {"id": "fsk-915", "regions": ["US"], "freq_mhz": 915.0, "mode": "fsk_pkt", "sync": "2dd4", "pktlen": 20, "rxbw_khz": 203, "drate_kbaud": 17.24, "dev_khz": 38, "dwell_s": 60, "fw": "nmap",
+     "why": "Ambient Weather/Ecowitt/LaCrosse 915 MHz weather sensors"},
+    {"id": "fsk-868", "regions": ["EU"], "freq_mhz": 868.3, "mode": "fsk_pkt", "sync": "2dd4", "pktlen": 20, "rxbw_khz": 203, "drate_kbaud": 17.24, "dev_khz": 38, "dwell_s": 60, "fw": "nmap",
+     "why": "LaCrosse IT+/TFA and Fine Offset 868 MHz weather sensors"},
+    {"id": "wmbus-t1", "regions": ["EU"], "freq_mhz": 868.95, "mode": "fsk_pkt", "sync": "543d", "pktlen": 60, "rxbw_khz": 325, "drate_kbaud": 100, "dev_khz": 50, "dwell_s": 60, "fw": "nmap",
+     "why": "Wireless M-Bus utility meters"},
+    {"id": "ook-868", "regions": ["EU"], "freq_mhz": 868.35, "mode": "ook", "rxbw_khz": 270, "drate_kbaud": 5, "dwell_s": 30,
+     "why": "868 MHz OOK alarm sensors and remotes"}
+  ]
+}

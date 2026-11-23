@@ -1,2 +1,3 @@
-requests
-manchester-code
+# Runtime: Python 3.9+. Only the hardware backends need requests;
+# the dashboard, decoders, simulator and tests use the standard library.
+requests>=2.25
