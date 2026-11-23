@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cc1101-nmap · What's near</title>
+<style>
+:root {
+  --bg: #0f1216; --panel: #171b21; --panel2: #1d222a; --line: #2a313b; --text: #e7ebf0; --muted: #96a0ad;
+  --faint: #6b7582; --accent: #5ab0ff; --ok: #3ecf8e; --warn: #f5b942; --bad: #ff5d5d; --info: #8fa6ff;
+  --c-public_safety: #ff5d5d; --c-government: #b98cff; --c-two_way_radio: #ff9f43; --c-transport: #c89b6d;
+  --c-cellular: #2ec4b6; --c-paging: #94a3b8; --c-weather: #4fb3ff; --c-home_security: #f5b942;
+  --c-home_iot: #a78bfa; --c-remote_control: #f472b6; --c-vehicle: #818cf8; --c-utility: #34d399;
+  --c-iot: #22d3ee; --c-medical: #fb7185; --c-science: #a3e635; --c-amateur: #9ca3af; --c-local: #facc15;
+  --c-unknown: #8b95a1;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f6f9; --panel: #ffffff; --panel2: #f0f3f7; --line: #dde3ea; --text: #17202b; --muted: #5b6776;
+    --faint: #8a95a3; --accent: #0b6bcb; --ok: #138a55; --warn: #a86b00; --bad: #c62828; --info: #3d55c9;
+    --c-public_safety: #d32f2f; --c-government: #7e57c2; --c-two_way_radio: #e67e22; --c-transport: #8d6e4f;
+    --c-cellular: #00897b; --c-paging: #64748b; --c-weather: #1e88e5; --c-home_security: #c48a00;
+    --c-home_iot: #7c4dff; --c-remote_control: #d81b78; --c-vehicle: #4f5bd5; --c-utility: #1b9e6e;
+    --c-iot: #0097a7; --c-medical: #e11d48; --c-science: #65a30d; --c-amateur: #6b7280; --c-local: #b38600;
+    --c-unknown: #7a8591;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 10px 16px; }
+h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+h1 span { color: var(--muted); font-weight: 500; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px;
+  background: var(--panel2); border: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.dot.live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+.dot.sim { background: var(--warn); } .dot.down { background: var(--bad); }
+.hdr-meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+main { max-width: 1500px; margin: 0 auto; padding: 14px 16px 40px; display: grid; gap: 14px;
+  grid-template-columns: minmax(0, 2.1fr) minmax(300px, 1fr); }
+section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+.full { grid-column: 1 / -1; }
+.banner { grid-column: 1 / -1; border-radius: 10px; padding: 12px 14px; display: none; gap: 12px; align-items: flex-start;
+  background: color-mix(in srgb, var(--bad) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.banner.show { display: flex; } .banner b { color: var(--bad); }
+.banner.sim { background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.banner.sim b { color: var(--warn); }
+.stats { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.stat .v { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat .k { color: var(--muted); font-size: 12px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px; }
+.chip { cursor: pointer; border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+  border-radius: 99px; padding: 4px 10px; font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel2)); }
+.chip .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.spacer { flex: 1; }
+label.tog { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.card { background: var(--panel2); border: 1px solid var(--line); border-left: 4px solid var(--cat, var(--faint));
+  border-radius: 9px; padding: 10px 12px; cursor: pointer; min-width: 0; }
+.card.idle { opacity: .62; }
+.card.alerting { box-shadow: 0 0 0 1px var(--bad) inset; }
+.card .top { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em; }
+.card .top .cat { color: var(--cat); font-weight: 600; }
+.card .title { font-weight: 620; margin: 3px 0 2px; font-size: 14px; }
+.card .sub { color: var(--text); font-size: 13px; opacity: .9; overflow-wrap: anywhere; }
+.card .sub .warn { color: var(--warn); font-weight: 600; } .card .sub .bad { color: var(--bad); font-weight: 700; }
+.row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.badge.decoded { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+.badge.structure { color: var(--info); border-color: color-mix(in srgb, var(--info) 50%, var(--line)); }
+.badge.energy { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.prox { display: inline-flex; gap: 2px; vertical-align: middle; }
+.prox i { width: 9px; height: 9px; border-radius: 2px; background: var(--line); display: block; }
+.prox i.on { background: var(--cat, var(--accent)); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.muted { color: var(--muted); } .small { font-size: 12px; }
+svg.spark { width: 84px; height: 22px; margin-left: auto; }
+.details { display: none; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; font-size: 12.5px; }
+.card.open .details { display: block; }
+.details p { margin: 0 0 6px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin-top: 6px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.empty { color: var(--muted); padding: 24px 6px; text-align: center; }
+#feed { list-style: none; margin: 0; padding: 0; max-height: 560px; overflow: auto; }
+#feed li { display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+#feed li .t { color: var(--faint); font-variant-numeric: tabular-nums; }
+#feed li.alert { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+#feed li.alert .m { color: var(--bad); font-weight: 600; }
+#feed .k { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--cat, var(--faint)); }
+.specwrap { position: relative; }
+canvas#spec { width: 100%; height: 230px; display: block; }
+#tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; white-space: nowrap; z-index: 3; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
+td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; background: var(--cat); }
+details > summary { cursor: pointer; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12px; }
+.listen { display: inline-flex; gap: 6px; align-items: center; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } #feed { max-height: 360px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>cc1101-nmap <span>· what's near</span></h1>
+  <span class="pill" id="conn"><span class="dot" id="conndot"></span><span id="conntext">connecting…</span></span>
+  <div class="hdr-meta">
+    <span class="listen" id="listening"></span>
+    <span id="sweepinfo"></span>
+    <span id="uptime"></span>
+  </div>
+</header>
+
+<main>
+  <div class="banner sim" id="simbanner"><div><b>Simulated data.</b> This is the built-in demo neighbourhood (--backend sim), not live radio.</div></div>
+  <div class="banner" id="alertbanner" role="alert"><div id="alerttext"></div></div>
+
+  <div class="stats">
+    <div class="stat"><div class="v" id="s-active">–</div><div class="k">transmitting now</div></div>
+    <div class="stat"><div class="v" id="s-devices">–</div><div class="k">identified devices</div></div>
+    <div class="stat"><div class="v" id="s-rf">–</div><div class="k">radio services heard</div></div>
+    <div class="stat"><div class="v" id="s-alerts">–</div><div class="k">nearby public-safety alerts (1 h)</div></div>
+    <div class="stat"><div class="v" id="s-decoded">–</div><div class="k">packets decoded</div></div>
+  </div>
+
+  <section class="panel">
+    <h2>What's near</h2>
+    <div class="toolbar" id="filters"></div>
+    <div class="cards" id="cards"><div class="empty">Waiting for the first signals…</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Activity</h2>
+    <ul id="feed"></ul>
+  </section>
+
+  <section class="panel full">
+    <h2>Live spectrum <span class="muted small" id="spechint" style="text-transform:none;letter-spacing:0"></span></h2>
+    <div class="specwrap"><canvas id="spec"></canvas><div id="tip"></div></div>
+    <div class="legend" style="margin-top:8px">
+      <span>Bars: peak signal per frequency since the last sweep</span><span>Line: learned noise floor</span>
+      <span>Bands are grouped by what normally transmits there</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Infrastructure in range</h2>
+    <div id="infra" class="small muted">Towers and repeaters appear here once heard. They show which systems cover you, not who is close.</div>
+  </section>
+
+  <section class="panel">
+    <h2>How to read this</h2>
+    <div class="small">
+      <p><span class="badge decoded">decoded ✓</span> packet decoded and its CRC/checksum verified - this exact device.</p>
+      <p><span class="badge structure">signal structure</span> a clearly man-made signal no decoder knows yet; identified by band.</p>
+      <p><span class="badge energy">RF energy</span> a transmission we can measure but not demodulate (P25, TETRA, LTE, LoRa); identified by band and behaviour.</p>
+      <p class="muted">Distance is estimated from signal strength and each emitter's typical power. Treat it as "next door / down the street / across town", not a position. Walls, antennas and terrain move it by a factor of 2-3.</p>
+    </div>
+    <details style="margin-top:8px"><summary>What this scanner can detect here</summary><div id="catalog" class="small" style="margin-top:8px"></div></details>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let STATE = null, CATALOG = null, FILTER = "all", ACTIVE_ONLY = false;
+const OPEN = new Set();
+
+function ago(s) {
+  s = Math.max(0, Math.round(s));
+  if (s < 5) return "now";
+  if (s < 60) return s + " s ago";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " d ago";
+}
+function clock(t) { return new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}); }
+function catVar(c) { return `var(--c-${c || "unknown"})`; }
+function dur(s) { s = Math.round(s); return s < 3600 ? Math.floor(s / 60) + "m" : Math.floor(s / 3600) + "h " + Math.floor(s % 3600 / 60) + "m"; }
+
+function summary(it) {
+  const f = it.fields || {}, out = [];
+  if (f.temperature_C !== undefined) out.push(`${esc(f.temperature_C)} °C`);
+  if (f.humidity_pct !== undefined) out.push(`${esc(f.humidity_pct)} %`);
+  if (f.wind_avg_m_s !== undefined) out.push(`wind ${esc(f.wind_avg_m_s)} m/s`);
+  if (f.wind_dir_deg !== undefined) out.push(`${esc(f.wind_dir_deg)}°`);
+  if (f.rain_mm !== undefined) out.push(`rain ${esc(f.rain_mm)} mm`);
+  if (f.state) out.push(f.state === "open" ? `<span class="warn">open</span>` : "closed");
+  if (f.alarm) out.push(`<span class="bad">ALARM</span>`);
+  if (f.tamper) out.push(`<span class="bad">tamper</span>`);
+  if (f.manufacturer) out.push(esc(f.manufacturer));
+  if (f.device_type) out.push(esc(f.device_type.toLowerCase()));
+  if (f.serial) out.push("#" + esc(f.serial));
+  if (f.chip_guess) out.push(esc(f.chip_guess) + " · button " + esc(f.button_bits));
+  if (f.channel !== undefined && !f.serial) out.push("ch " + esc(f.channel));
+  if (f.id !== undefined && !f.serial) out.push("id " + esc(f.id));
+  if (f.battery_ok === false) out.push(`<span class="warn">battery low</span>`);
+  if (it.kind === "rf") {
+    const chs = (it.channels || []).slice(0, 3).map((c) => c.freq_mhz.toFixed(4)).join(", ");
+    out.push(chs + " MHz" + (f.channels_active > 1 ? ` · ${f.channels_active} channels` : ""));
+  }
+  if (it.kind === "unknown") out.push(`${esc(f.modulation)} · pulses ${esc((f.pulses_us || []).join("/"))} µs`);
+  return out.join(" · ");
+}
+
+function proxBar(p) {
+  const lvl = !p ? 0 : {very_close: 4, nearby: 3, area: 2, distant: 1}[p.bucket];
+  let s = '<span class="prox" aria-hidden="true">';
+  for (let i = 1; i <= 4; i++) s += `<i class="${i <= lvl ? "on" : ""}"></i>`;
+  return s + "</span>";
+}
+
+function spark(hist) {
+  if (!hist || hist.length < 2) return "";
+  const xs = hist.map((h) => h[0]), ys = hist.map((h) => h[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(0, ...xs), y0 = Math.min(...ys) - 3, y1 = Math.max(...ys) + 3;
+  const pt = ([x, y]) => [(2 + 80 * (x - x0) / (x1 - x0 || 1)).toFixed(1), (20 - 18 * (y - y0) / (y1 - y0 || 1)).toFixed(1)];
+  const pts = hist.map(pt);
+  return `<svg class="spark" viewBox="0 0 84 22" role="img" aria-label="signal strength, last ${Math.round(-x0 / 60) || 1} min">
+    <polyline fill="none" stroke="var(--cat)" stroke-width="1.5" stroke-linejoin="round" points="${pts.map((p) => p.join(",")).join(" ")}"/>
+    ${pts.length <= 12 ? pts.map(([a, b]) => `<circle cx="${a}" cy="${b}" r="1.8" fill="var(--cat)"/>`).join("") : ""}</svg>`;
+}
+
+const BADGE = {decoded: ["decoded", "decoded ✓"], structure: ["structure", "signal structure"], energy: ["energy", "RF energy"]};
+
+function card(it, now) {
+  const age = now - it.last_seen;
+  const p = it.proximity;
+  const [bcls, btxt] = BADGE[it.confidence];
+  const recentAlert = it.alert_class && it.active && p && (p.bucket === "very_close" || p.bucket === "nearby");
+  const fields = Object.entries(it.fields || {}).filter(([k]) => !["pulses_us", "gaps_us"].includes(k));
+  const chans = (it.channels || []).map((c) => `${c.freq_mhz.toFixed(4)} MHz (${c.count}×, peak ${c.peak} dBm, ${ago(now - c.last_seen)})`);
+  return `<article class="card ${it.active ? "" : "idle"} ${recentAlert ? "alerting" : ""} ${OPEN.has(it.key) ? "open" : ""}"
+     style="--cat:${catVar(it.category)}" data-key="${esc(it.key)}" tabindex="0">
+    <div class="top"><span class="cat">${esc(it.category_label)}${it.service ? " · " + esc(it.service) : ""}</span>
+      <span>${it.active ? "● active" : esc(ago(age))}</span></div>
+    <div class="title">${esc(it.name)}</div>
+    <div class="sub">${summary(it) || '<span class="muted">' + esc(it.fields?.model || "") + "</span>"}</div>
+    <div class="row">
+      ${proxBar(p)}<span class="small">${p ? esc(p.label) + ` · ~${p.meters} m` : '<span class="muted">distance n/a</span>'}</span>
+      ${spark(it.history)}
+    </div>
+    <div class="row small muted">
+      <span class="badge ${bcls}">${btxt}</span>
+      <span class="mono">${it.freq_mhz.toFixed(it.kind === "rf" ? 4 : 2)} MHz</span>
+      ${it.rssi !== null ? `<span class="mono">${it.rssi} dBm</span>` : ""}
+      <span>${it.count}× heard${it.interval_s ? ` · every ~${Math.round(it.interval_s)} s` : ""}</span>
+      ${it.gone ? '<span class="badge">not heard lately</span>' : ""}
+    </div>
+    <div class="details">
+      ${it.meaning ? `<p>${esc(it.meaning)}</p>` : ""}
+      ${it.caveats ? `<p class="muted">${esc(it.caveats)}</p>` : ""}
+      <dl class="kv">
+        <dt>first seen</dt><dd>${esc(ago(now - it.first_seen))}</dd>
+        ${it.integrity ? `<dt>integrity</dt><dd>${esc(it.integrity)}</dd>` : ""}
+        ${fields.map(([k, v]) => `<dt>${esc(k.replace(/_/g, " "))}</dt><dd>${esc(Array.isArray(v) ? v.join(", ") : v)}</dd>`).join("")}
+        ${chans.length ? `<dt>channels</dt><dd>${chans.map(esc).join("<br>")}</dd>` : ""}
+      </dl>
+    </div>
+  </article>`;
+}
+
+function renderFilters(items) {
+  const counts = {};
+  for (const it of items) counts[it.category] = (counts[it.category] || 0) + 1;
+  const labels = {};
+  for (const it of items) labels[it.category] = it.category_label;
+  const cats = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  if (FILTER !== "all" && !counts[FILTER]) FILTER = "all";
+  let h = `<button class="chip" aria-pressed="${FILTER === "all"}" data-f="all">All <span class="n">${items.length}</span></button>`;
+  for (const c of cats) h += `<button class="chip" aria-pressed="${FILTER === c}" data-f="${esc(c)}" style="--cat:${catVar(c)}"><span class="dot" style="background:var(--cat)"></span>${esc(labels[c])} <span class="n">${counts[c]}</span></button>`;
+  h += `<span class="spacer"></span><label class="tog"><input type="checkbox" id="activeonly" ${ACTIVE_ONLY ? "checked" : ""}> transmitting now only</label>`;
+  $("filters").innerHTML = h;
+}
+
+function renderCards(items, now) {
+  const shown = items.filter((it) => (FILTER === "all" || it.category === FILTER) && (!ACTIVE_ONLY || it.active));
+  $("cards").innerHTML = shown.length ? shown.map((it) => card(it, now)).join("")
+    : `<div class="empty">${items.length ? "Nothing matches this filter." : "Nothing heard yet. Devices appear as they transmit; weather sensors report every 15-60 s."}</div>`;
+}
+
+function renderFeed(events, now) {
+  const evs = events.slice().reverse().slice(0, 120);
+  $("feed").innerHTML = evs.length ? evs.map((e) => `<li class="${e.level === "alert" ? "alert" : ""}" style="--cat:${catVar(e.category)}">
+      <span class="t" title="${esc(new Date(e.t * 1000).toLocaleString())}">${esc(clock(e.t))}</span>
+      <span class="m"><span class="k"></span>${esc(e.message)}</span></li>`).join("")
+    : '<li><span></span><span class="muted">No activity yet.</span></li>';
+}
+
+function renderInfra(items, now) {
+  if (!items.length) return;
+  $("infra").innerHTML = `<table><thead><tr><th>System</th><th>Frequencies</th><th>Signal</th><th>Last</th></tr></thead><tbody>${
+    items.map((it) => `<tr style="--cat:${catVar(it.category)}"><td><span class="sw"></span>${esc(it.name)}</td>
+      <td class="mono">${(it.channels || []).slice(0, 4).map((c) => c.freq_mhz.toFixed(4)).join("<br>") || it.freq_mhz}</td>
+      <td class="mono">${it.rssi ?? "–"} dBm</td><td>${esc(ago(now - it.last_seen))}</td></tr>`).join("")}</tbody></table>`;
+}
+
+function renderHeader(s) {
+  const st = s.status || {};
+  const sim = !!st.simulated;
+  const ok = st.connected !== false && st.backend;
+  $("conndot").className = "dot " + (sim ? "sim" : ok ? "live" : "down");
+  $("conntext").textContent = sim ? "SIMULATED" : ok ? `live · ${st.backend === "stock" ? "stock Evil Crow firmware" : st.backend === "nmap" ? "cc1101-nmap firmware" : st.backend} · ${st.host || ""}`
+    : st.error ? "disconnected · " + st.error : "connecting…";
+  $("simbanner").classList.toggle("show", sim);
+  const l = (st.listening || [])[0];
+  $("listening").innerHTML = l ? `listening <b class="mono">${l.freq_mhz.toFixed(2)} MHz ${esc(l.mode)}</b> <span>${esc(l.why || "")}</span>` : "";
+  const sweeps = s.stats?.sweeps || 0;
+  $("sweepinfo").textContent = st.sweep_points ? `sweep ${st.sweep_points} channels${st.sweep_ms ? " in " + st.sweep_ms + " ms" : ""} · ${sweeps} sweeps` : (st.limitations || [])[0] || "";
+  $("uptime").textContent = "up " + dur(s.uptime_s);
+}
+
+function renderStats(s) {
+  const near = s.near;
+  $("s-active").textContent = near.filter((i) => i.active).length;
+  $("s-devices").textContent = near.filter((i) => i.kind === "device").length;
+  $("s-rf").textContent = near.filter((i) => i.kind === "rf").length;
+  $("s-alerts").textContent = s.counts.alerts_1h;
+  $("s-decoded").textContent = s.stats.decoded;
+  const recent = s.events.filter((e) => e.level === "alert" && s.now - e.t < 600);
+  const ab = $("alertbanner");
+  if (recent.length) {
+    const e = recent[recent.length - 1];
+    $("alerttext").innerHTML = `<b>${esc(e.message)}</b><div class="small">${esc(ago(s.now - e.t))}${recent.length > 1 ? ` · ${recent.length} alerts in 10 min` : ""}</div>`;
+    ab.classList.add("show");
+  } else ab.classList.remove("show");
+}
+
+// ---- spectrum -----------------------------------------------------------
+let SPEC_LAYOUT = [];
+function entryOf(id) { return CATALOG?.entries.find((e) => e.id === id); }
+function drawSpectrum(sp) {
+  const cv = $("spec"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const css = getComputedStyle(document.documentElement);
+  const col = (v) => css.getPropertyValue(v).trim();
+  if (!sp) { g.fillStyle = col("--muted"); g.font = "13px system-ui"; g.fillText("No sweep data. RSSI sweeps need the cc1101-nmap companion firmware (or --backend sim).", 12, 28); return; }
+  // bins arrive in sweep-plan order: a plan segment is a run with a constant step
+  const segs = [];
+  sp.freqs.forEach((f, i) => {
+    const last = segs[segs.length - 1];
+    if (last) {
+      const n = last.idx.length, j = last.idx[n - 1], d = f - sp.freqs[j];
+      const step = n > 1 ? sp.freqs[j] - sp.freqs[last.idx[n - 2]] : d;
+      if (d > 0 && d < 0.6 && Math.abs(d - step) < 0.002) { last.idx.push(i); return; }
+    }
+    segs.push({idx: [i]});
+  });
+  for (const s of segs) {           // label each segment by its most common entry
+    const n = {};
+    for (const i of s.idx) n[sp.entries[i]] = (n[sp.entries[i]] || 0) + 1;
+    s.id = Object.keys(n).sort((a, b) => n[b] - n[a])[0];
+  }
+  segs.sort((a, b) => sp.freqs[a.idx[0]] - sp.freqs[b.idx[0]]);
+  const top = 8, bottom = 44, left = 34, gap = 6;
+  const plotH = H - top - bottom, total = segs.reduce((n, s) => n + Math.max(s.idx.length, 4), 0);
+  const usable = W - left - gap * (segs.length - 1) - 4;
+  const ymin = -110, ymax = -20, y = (v) => top + plotH * (1 - (Math.max(ymin, Math.min(ymax, v)) - ymin) / (ymax - ymin));
+  g.strokeStyle = col("--line"); g.fillStyle = col("--faint"); g.font = "10px system-ui"; g.lineWidth = 1;
+  for (let v = -100; v <= -30; v += 20) { g.beginPath(); g.moveTo(left, y(v)); g.lineTo(W, y(v)); g.stroke(); g.fillText(v, 2, y(v) + 3); }
+  let x = left; SPEC_LAYOUT = [];
+  for (const s of segs) {
+    const w = usable * Math.max(s.idx.length, 4) / total, bw = w / s.idx.length;
+    const e = entryOf(s.id);
+    s.idx.forEach((i, k) => {
+      const bx = x + k * bw, active = sp.peak[i] > sp.floor[i] + 12, be = entryOf(sp.entries[i]) || e;
+      g.fillStyle = col("--c-" + (be?.category || "unknown")); g.globalAlpha = active ? 0.95 : 0.28;
+      g.fillRect(bx, y(sp.peak[i]), Math.max(1, bw - (bw > 3 ? 1 : 0)), y(ymin) - y(sp.peak[i]));
+      SPEC_LAYOUT.push({x0: bx, x1: bx + bw, i, e: be});
+    });
+    g.globalAlpha = 1; g.strokeStyle = col("--text"); g.lineWidth = 1; g.beginPath();
+    s.idx.forEach((i, k) => { const px = x + (k + 0.5) * bw; k ? g.lineTo(px, y(sp.floor[i])) : g.moveTo(px, y(sp.floor[i])); });
+    g.stroke();
+    g.fillStyle = col("--muted"); g.font = "10px system-ui";
+    const f0 = sp.freqs[s.idx[0]], f1 = sp.freqs[s.idx[s.idx.length - 1]];
+    const lbl = e ? shortName(e) : "local";
+    g.save(); g.beginPath(); g.rect(x, H - bottom, w, bottom); g.clip();
+    g.fillText(lbl, x + 1, H - bottom + 14);
+    g.fillStyle = col("--faint"); g.fillText(f0 === f1 ? f0.toFixed(3) : `${f0.toFixed(0)}-${f1.toFixed(0)}`, x + 1, H - bottom + 27);
+    g.restore();
+    x += w + gap;
+  }
+}
+function shortName(e) { return e.name.replace(/\s*\(.*\)/, "").replace(" transmitting", "").slice(0, 30); }
+$("spec").addEventListener("mousemove", (ev) => {
+  const sp = STATE?.spectrum; if (!sp) return;
+  const r = ev.target.getBoundingClientRect(), x = ev.clientX - r.left;
+  const hit = SPEC_LAYOUT.find((b) => x >= b.x0 && x < b.x1);
+  const tip = $("tip");
+  if (!hit) { tip.style.display = "none"; return; }
+  const i = hit.i;
+  tip.innerHTML = `<b class="mono">${sp.freqs[i].toFixed(4)} MHz</b><br>peak ${sp.peak[i]} dBm · floor ${sp.floor[i]} dBm<br>${esc(hit.e?.name || "local frequency")}`;
+  tip.style.display = "block";
+  tip.style.left = Math.min(x + 12, r.width - tip.offsetWidth - 4) + "px"; tip.style.top = (ev.clientY - r.top - 10) + "px";
+});
+$("spec").addEventListener("mouseleave", () => { $("tip").style.display = "none"; });
+
+function renderCatalog() {
+  if (!CATALOG) return;
+  const groups = {};
+  for (const e of CATALOG.entries) (groups[e.category_label] ||= []).push(e);
+  const how = {decode: "decoded", pulses: "pulse timing", energy: "RF energy"};
+  $("catalog").innerHTML = `<p class="muted">Region ${esc(CATALOG.region)} · tuning ${CATALOG.bands.map((b) => b.join("-")).join(", ")} MHz${CATALOG.extended_range ? " (extended)" : ""}</p>
+    <table><thead><tr><th>What</th><th>MHz</th><th>How</th></tr></thead><tbody>${
+    Object.entries(groups).map(([g, es]) => es.map((e) => `<tr style="--cat:${catVar(e.category)}"><td><span class="sw"></span>${esc(e.name)}</td>
+      <td class="mono">${e.ranges_mhz.map((r) => r[0] === r[1] ? r[0] : r.join("-")).join(", ")}</td><td>${how[e.detect]}</td></tr>`).join("")).join("")}</tbody></table>`;
+}
+
+function render(s) {
+  STATE = s;
+  renderHeader(s); renderStats(s);
+  renderFilters(s.near); renderCards(s.near, s.now);
+  renderFeed(s.events, s.now); renderInfra(s.infrastructure, s.now);
+  drawSpectrum(s.spectrum);
+  $("spechint").textContent = s.spectrum ? `· ${s.spectrum.freqs.length} channels` : "";
+}
+
+document.addEventListener("click", (ev) => {
+  const chip = ev.target.closest(".chip");
+  if (chip) { FILTER = chip.dataset.f; STATE && render(STATE); return; }
+  if (ev.target.id === "activeonly") { ACTIVE_ONLY = ev.target.checked; STATE && render(STATE); return; }
+  const c = ev.target.closest(".card");
+  if (c) { const k = c.dataset.key; OPEN.has(k) ? OPEN.delete(k) : OPEN.add(k); c.classList.toggle("open"); }
+});
+document.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.classList?.contains("card")) ev.target.click(); });
+window.addEventListener("resize", () => STATE && drawSpectrum(STATE.spectrum));
+
+async function poll() {
+  try { render(await (await fetch("/api/state")).json()); } catch (e) { markDown(); }
+}
+function markDown() { $("conndot").className = "dot down"; $("conntext").textContent = "dashboard lost contact with scanner"; }
+function connect() {
+  if (!window.EventSource) { setInterval(poll, 2000); return; }
+  const es = new EventSource("/api/stream");
+  es.onmessage = (m) => render(JSON.parse(m.data));
+  es.onerror = () => { markDown(); };
+}
+fetch("/api/catalog").then((r) => r.json()).then((c) => { CATALOG = c; renderCatalog(); STATE && drawSpectrum(STATE.spectrum); }).catch(() => {});
+poll().then(connect);
+</script>
+</body>
+</html>

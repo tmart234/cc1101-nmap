@@ -1,17 +1,21 @@
+# Install:  sudo cp evil_nmap.service /etc/systemd/system/ && sudo systemctl enable --now evil_nmap
+# Dashboard: http://<this-pi>:8080/     Logs: journalctl -u evil_nmap -f
 [Unit]
-Description=EvilCrow RF Scanner Service
-After=network.target
+Description=cc1101-nmap passive sub-GHz scanner (Evil Crow RF V2)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=/opt/evilcrow
-ExecStart=/opt/evilcrow/venv/bin/python /opt/evilcrow/evilcrow_scanner.py --interval 900 --ip 192.168.4.1 --freqs 433,915,315,868,405
+StateDirectory=cc1101-nmap
+# Add --local-freqs /opt/evilcrow/local.csv for your area's police/fire channels,
+# --region EU outside North America, --extended-range for TETRA/paging/467 MHz.
+ExecStart=/opt/evilcrow/venv/bin/python /opt/evilcrow/evilcrow_scanner.py --host evilcrow-rf.local --region US --events-log /var/lib/cc1101-nmap/events.jsonl
 Restart=on-failure
 RestartSec=5
-StandardOutput=syslog
-StandardError=syslog
-SyslogIdentifier=evilcrow
+SyslogIdentifier=evil_nmap
 
 [Install]
 WantedBy=multi-user.target

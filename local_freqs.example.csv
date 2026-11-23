@@ -1,0 +1,6 @@
+freq_mhz,label,category,alert
+851.0125,8CALL90 interop calling (output),Law/Fire/EMS interop,yes
+853.4125,County P25 - Sheriff Dispatch (site output),Law Dispatch,
+854.2375,County P25 - Fire Dispatch (site output),Fire Dispatch,
+460.2250,City PD (repeater output),Law Dispatch,
+462.5625,FRS channel 1,Neighbourhood watch,no
