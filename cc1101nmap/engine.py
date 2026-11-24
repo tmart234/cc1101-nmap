@@ -171,8 +171,10 @@ class Engine:
             self._bump()
 
     def _device(self, d: Decoded, freq: float, rssi: Optional[float], t: float):
-        self.stats["decoded"] += 1
         entry = self.catalog.get(d.catalog_id)
+        if entry and entry.sensitive and not self.allow_sensitive:
+            return
+        self.stats["decoded"] += 1
         tr = self.tracks.get(d.device_key)
         if tr is None:
             tr = Track(d.device_key, "device", entry, entry.name if entry else d.model, freq, t, t,

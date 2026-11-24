@@ -18,7 +18,7 @@
     GET  /nmap/info        firmware/module info (?dash=PORT tells us the dashboard port)
     POST /nmap/plan        segments=startkHz:stopkHz:stepkHz:rxbwkHz,...  [dwell_us, reads]
     GET  /nmap/spectrum    peak/avg RSSI per planned frequency since the last call
-    POST /nmap/rx          module=2 freq_khz mode=ook|fsk_raw|fsk_pkt rxbw_khz drate dev_khz [sync pktlen min_us end_us squelch]
+    POST /nmap/rx          module=2 freq_khz mode=ook|fsk_raw|fsk_pkt|ook_pkt rxbw_khz drate dev_khz [sync pktlen manchester min_us end_us squelch]
     GET  /nmap/events      captures and packets newer than ?since=SEQ
 
   Wi-Fi: same as the stock firmware - SSID and password on the first two
@@ -74,14 +74,15 @@ static uint8_t readsPerPoint = 3;
 static uint16_t currentBw = 0;
 
 // ---- analyst: capture / packets ----------------------------------------------
-enum Mode : uint8_t { M_OFF = 0, M_OOK = 1, M_FSK_RAW = 2, M_FSK_PKT = 3 };
-static const char *MODE_NAMES[] = {"off", "ook", "fsk_raw", "fsk_pkt"};
+enum Mode : uint8_t { M_OFF = 0, M_OOK = 1, M_FSK_RAW = 2, M_FSK_PKT = 3, M_OOK_PKT = 4 };
+static const char *MODE_NAMES[] = {"off", "ook", "fsk_raw", "fsk_pkt", "ook_pkt"};
 
 struct AnalystCfg {
   Mode mode = M_OFF;
   uint32_t freqKhzX10 = 4339200;
   float rxbw = 270, drate = 5, dev = 0;
   uint8_t sync1 = 0x2D, sync0 = 0xD4, pktlen = 20;
+  bool manchester = false;
   uint16_t minUs = 60;
   uint32_t endUs = 15000;
   int8_t squelch = -95;
@@ -217,7 +218,7 @@ static void storeCapture(volatile uint16_t *buf, uint16_t len, int8_t rssi) {
 static void analystService() {
   if (!moduleOk[ANALYST] || acfg.mode == M_OFF) return;
   ELECHOUSE_cc1101.setModul(ANALYST);
-  if (acfg.mode == M_FSK_PKT) {
+  if (acfg.mode == M_FSK_PKT || acfg.mode == M_OOK_PKT) {
     uint8_t rxb = ELECHOUSE_cc1101.SpiReadStatus(CC1101_RXBYTES);
     uint8_t need = acfg.pktlen + 2;     // + appended RSSI and LQI
     if (rxb & 0x80) {                    // FIFO overflow
@@ -267,11 +268,11 @@ static void analystConfigure() {
   ELECHOUSE_cc1101.setModul(ANALYST);
   ELECHOUSE_cc1101.Init();
   float mhz = acfg.freqKhzX10 / 10000.0f;
-  if (acfg.mode == M_FSK_PKT) {
+  if (acfg.mode == M_FSK_PKT || acfg.mode == M_OOK_PKT) {
     ELECHOUSE_cc1101.setCCMode(1);
-    ELECHOUSE_cc1101.setModulation(0);           // 2-FSK
+    ELECHOUSE_cc1101.setModulation(acfg.mode == M_OOK_PKT ? 2 : 0);   // ASK/OOK or 2-FSK
     ELECHOUSE_cc1101.setMHZ(mhz);
-    ELECHOUSE_cc1101.setDeviation(acfg.dev);
+    if (acfg.mode == M_FSK_PKT) ELECHOUSE_cc1101.setDeviation(acfg.dev);
     ELECHOUSE_cc1101.setDRate(acfg.drate);
     ELECHOUSE_cc1101.setRxBW(acfg.rxbw);
     ELECHOUSE_cc1101.setSyncMode(2);             // 16/16 sync bits
@@ -281,7 +282,7 @@ static void analystConfigure() {
     ELECHOUSE_cc1101.setPacketLength(acfg.pktlen);
     ELECHOUSE_cc1101.setCrc(0);
     ELECHOUSE_cc1101.setWhiteData(0);
-    ELECHOUSE_cc1101.setManchester(0);
+    ELECHOUSE_cc1101.setManchester(acfg.manchester ? 1 : 0);
     ELECHOUSE_cc1101.setAdrChk(0);
     ELECHOUSE_cc1101.setAppendStatus(1);
     ELECHOUSE_cc1101.SpiStrobe(CC1101_SIDLE);
@@ -477,13 +478,17 @@ static void handleRx() {
     return;
   }
   String m = server.arg("mode");
-  acfg.mode = m == "ook" ? M_OOK : m == "fsk_raw" ? M_FSK_RAW : m == "fsk_pkt" ? M_FSK_PKT : M_OFF;
+  acfg.mode = m == "ook" ? M_OOK
+            : m == "fsk_raw" ? M_FSK_RAW
+            : m == "fsk_pkt" ? M_FSK_PKT
+            : m == "ook_pkt" ? M_OOK_PKT : M_OFF;
   acfg.freqKhzX10 = (uint32_t)(server.arg("freq_khz").toFloat() * 10.0f + 0.5f);
   if (server.hasArg("rxbw_khz")) acfg.rxbw = server.arg("rxbw_khz").toFloat();
   if (server.hasArg("drate")) acfg.drate = server.arg("drate").toFloat();
   if (server.hasArg("dev_khz")) acfg.dev = server.arg("dev_khz").toFloat();
-  if (server.hasArg("min_us")) acfg.minUs = constrain(server.arg("min_us").toInt(), 5, 2000);
-  if (server.hasArg("end_us")) acfg.endUs = constrain(server.arg("end_us").toInt(), 1000, 60000);
+  acfg.manchester = server.hasArg("manchester") && server.arg("manchester") == "1";
+  acfg.minUs = server.hasArg("min_us") ? constrain(server.arg("min_us").toInt(), 5, 2000) : 60;
+  acfg.endUs = server.hasArg("end_us") ? constrain(server.arg("end_us").toInt(), 1000, 60000) : 15000;
   if (server.hasArg("squelch")) acfg.squelch = constrain(server.arg("squelch").toInt(), -128, 0);
   if (server.hasArg("pktlen")) acfg.pktlen = constrain(server.arg("pktlen").toInt(), 1, 62);
   if (server.hasArg("sync") && server.arg("sync").length() == 4) {

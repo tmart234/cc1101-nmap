@@ -116,5 +116,70 @@ class TestLocalFreqs(unittest.TestCase):
         self.assertEqual(cat.best(808.4125).id, "local-0-in")   # local list beats generic band
 
 
+class TestSensitiveAndBudget(unittest.TestCase):
+    def test_sweep_plan_fits_under_600_for_all_configs(self):
+        for region in ("US", "EU"):
+            for extended in (False, True):
+                for allow_sensitive in (False, True):
+                    cat = Catalog.load(region=region, extended=extended, allow_sensitive=allow_sensitive)
+                    full = cat.sweep_plan(2000)
+                    capped = cat.sweep_plan(600)
+                    self.assertEqual(len(capped), len(full), (region, extended, allow_sensitive))
+                    self.assertLessEqual(sum(s.points for s in capped), 600)
+
+    def test_sensitive_bands_and_profiles_are_gated_and_swept(self):
+        for region, expected_energy, expected_rx in (
+            ("US", {"medradio", "cospas-sarsat", "ems-med-base-us", "ems-med-mobile-us"},
+             {"ook-916-minimed", "fsk-433-omnipod"}),
+            ("EU", {"medradio", "cospas-sarsat", "social-alarm-eu", "eu-safety-alarms"},
+             {"ook-868-minimed", "fsk-433-omnipod"}),
+        ):
+            cat_off = Catalog.load(region=region, extended=True, allow_sensitive=False)
+            self.assertEqual([e for e in cat_off.entries if e.sensitive], [])
+            self.assertEqual([p for p in cat_off.rx_profiles if p.get("sensitive")], [])
+
+            cat_on = Catalog.load(region=region, extended=True, allow_sensitive=True)
+            rx_ids = {p["id"] for p in cat_on.rx_profiles if p.get("sensitive")}
+            self.assertEqual(rx_ids, expected_rx)
+            freqs = [f for s in cat_on.sweep_plan(600) for f in s.freqs()]
+            covered = {cat_on.best(f, ("energy",)).id for f in freqs if cat_on.best(f, ("energy",))}
+            self.assertTrue(expected_energy.issubset(covered), (region, expected_energy - covered))
+
+    def test_sensitive_decoded_devices_hidden_and_fields_redacted_by_default(self):
+        from cc1101nmap import encoders as E
+        from cc1101nmap.obs import Packet, PulseCapture
+
+        cat_off = Catalog.load(region="US", allow_sensitive=False)
+        eng_off = Engine(cat_off, allow_sensitive=False, clock=lambda: 100.0)
+        # Medical packets must be dropped completely unless allow_sensitive=True
+        eng_off.ingest_packet(Packet(E.minimed(0xA7, "597055", b"\x04\x00", pad_len=60), 916.5, "ff00", 100.0, -70))
+        eng_off.ingest_packet(Packet(E.omnipod("1f014829", "POD", 14), 433.91, "54c3", 100.0, -72))
+        self.assertEqual(eng_off.snapshot()["near"], [])
+        self.assertEqual(list(eng_off.events), [])
+
+        # MegaCode and Schrader TPMS decode by default, with replayable/tracking fields redacted
+        eng_off.ingest_capture(PulseCapture(E.megacode(3, 17316, 1), 318.0, "OOK", 100.0, -70))
+        eng_off.ingest_capture(PulseCapture(E.schrader_tpms(0x6703A38, 225.0, 23), 315.0, "OOK", 100.0, -75))
+        near = {i["entry_id"]: i for i in eng_off.snapshot()["near"]}
+        self.assertEqual(near["gate-318"]["fields"]["code"], "(redacted)")
+        self.assertEqual(near["gate-318"]["fields"]["serial"], "(redacted)")
+        self.assertEqual(near["gate-318"]["fields"]["facility"], "(redacted)")
+        self.assertEqual(near["tpms-schrader"]["fields"]["id"], "(redacted)")
+        for ev in eng_off.events:
+            self.assertNotIn("9A1D21", ev["message"])
+            self.assertNotIn("6703A38", ev["message"])
+
+        # With allow_sensitive=True, medical devices appear and fields are visible
+        cat_on = Catalog.load(region="US", allow_sensitive=True)
+        eng_on = Engine(cat_on, allow_sensitive=True, clock=lambda: 100.0)
+        eng_on.ingest_packet(Packet(E.minimed(0xA7, "597055", b"\x04\x00", pad_len=60), 916.5, "ff00", 100.0, -70))
+        eng_on.ingest_packet(Packet(E.omnipod("1f014829", "POD", 14), 433.91, "54c3", 100.0, -72))
+        eng_on.ingest_capture(PulseCapture(E.schrader_tpms(0x6703A38, 225.0, 23), 315.0, "OOK", 100.0, -75))
+        near_on = {i["entry_id"]: i for i in eng_on.snapshot()["near"]}
+        self.assertEqual(near_on["minimed-pump"]["fields"]["serial"], "597055")
+        self.assertEqual(near_on["omnipod-pump"]["fields"]["pod_address"], "1f014829")
+        self.assertEqual(near_on["tpms-schrader"]["fields"]["id"], "6703A38")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -248,8 +248,12 @@ class NmapFirmware(HttpBackend):
         args = dict(module="2", freq_khz=f"{p['freq_mhz'] * 1000:.1f}", mode=mode,
                     rxbw_khz=str(p.get("rxbw_khz", 203)), drate=str(p.get("drate_kbaud", 5)),
                     dev_khz=str(p.get("dev_khz", 0)))
-        if mode == "fsk_pkt":
+        if mode in ("fsk_pkt", "ook_pkt"):
             args.update(sync=p["sync"], pktlen=str(p.get("pktlen", 20)))
+            if p.get("manchester"):
+                args["manchester"] = "1"
+        if p.get("min_us"):
+            args["min_us"] = str(p["min_us"])
         self.post("/nmap/rx", **args)
         self.sink.status(listening=[{"module": 2, "freq_mhz": p["freq_mhz"], "mode": mode.upper(),
                                      "profile": p["id"], "why": p.get("why", "")}])

@@ -97,7 +97,60 @@ def ev1527(code24: int, t_us: int = 320, repeats: int = 6, rng=None) -> List[int
     return frame * repeats
 
 
-# --- FSK packet devices (bytes after the sync word) -------------------------
+def megacode(facility: int, serial: int, button: int = 1, t_us: int = 1000, repeats: int = 4,
+             rng=None) -> List[int]:
+    """Linear MegaCode 24-bit fixed-code OOK frame (318 MHz)."""
+    code = (1 << 23) | ((facility & 0xF) << 19) | ((serial & 0xFFFF) << 3) | (button & 0x7)
+    bits = f"{code:024b}"
+    frame: List[int] = []
+    for i, b in enumerate(bits):
+        frame.append(_jitter(t_us, rng))
+        if i + 1 == len(bits):
+            guard = 11 if b == "1" else 14
+            frame.append(_jitter(guard * t_us, rng))
+        else:
+            nxt = bits[i + 1]
+            if b == "1":
+                gap_t = 5 if nxt == "1" else 2
+            else:
+                gap_t = 8 if nxt == "1" else 5
+            frame.append(_jitter(gap_t * t_us, rng))
+    return frame * repeats
+
+
+def schrader_tpms(sensor_id: int, pressure_kpa: float, temp_c: int, flags: int = 0x67,
+                  rng=None) -> List[int]:
+    """Schrader TPMS GG4 68-bit OOK Manchester frame (315 / 433.92 MHz)."""
+    b = bytearray(8)
+    b[0] = 0xF0 | ((flags >> 4) & 0x0F)
+    b[1] = ((flags & 0x0F) << 4) | ((sensor_id >> 24) & 0x0F)
+    b[2] = (sensor_id >> 16) & 0xFF
+    b[3] = (sensor_id >> 8) & 0xFF
+    b[4] = sensor_id & 0xFF
+    b[5] = int(round(pressure_kpa / 2.5)) & 0xFF
+    b[6] = (temp_c + 50) & 0xFF
+    b[7] = B.crc8(bytes(b[:7]), 0x07, 0xF0)
+    data_bits = "0111" + B.bytes_to_bits(bytes(b))
+    raw = "".join("01" if c == "1" else "10" for c in data_bits)
+    if raw[0] == "0":
+        raw = "1" + raw
+    pulses: List[int] = []
+    level, run = raw[0], 0
+    for c in raw:
+        if c == level:
+            run += 1
+        else:
+            pulses.append(_jitter(120 * run, rng))
+            level, run = c, 1
+    pulses.append(_jitter(120 * run, rng))
+    if len(pulses) % 2:
+        pulses.append(2000)
+    else:
+        pulses[-1] = 2000
+    return pulses * 3
+
+
+# --- FSK / packet devices (bytes after the sync word) -----------------------
 
 def lacrosse_itplus(sensor_id: int, temp_c: float, humidity: Optional[int] = None,
                     weak_battery: bool = False) -> bytes:
@@ -163,3 +216,41 @@ def wmbus_t1(manufacturer: str, serial: str, version: int, dev_type: int) -> byt
 
 def wmbus_c1a(manufacturer: str, serial: str, version: int, dev_type: int) -> bytes:
     return b"\x54\xcd" + wmbus_block1(manufacturer, serial, version, dev_type) + bytes(20)
+
+
+_MINIMED_4B6B_ENC = {
+    0x0: 0b010101, 0x1: 0b110001, 0x2: 0b110010, 0x3: 0b100011,
+    0x4: 0b110100, 0x5: 0b100101, 0x6: 0b100110, 0x7: 0b010110,
+    0x8: 0b011010, 0x9: 0b011001, 0xA: 0b101010, 0xB: 0b001011,
+    0xC: 0b101100, 0xD: 0b001101, 0xE: 0b001110, 0xF: 0b011100,
+}
+
+
+def minimed(packet_type: int, serial_hex: str, payload: bytes = b"\x00\x00", pad_len: int = 0) -> bytes:
+    """Medtronic MiniMed 4b6b-encoded packet (after the 0xFF00 sync)."""
+    body = bytes([packet_type]) + bytes.fromhex(serial_hex) + payload
+    if packet_type in (0xA8, 0xAA, 0xAB):
+        crc = B.crc16(body, 0x1021, 0xFFFF)
+        frame = body + bytes([crc >> 8, crc & 0xFF])
+    else:
+        frame = body + bytes([B.crc8(body, 0x9B, 0x00)])
+    bitstr = "".join(f"{_MINIMED_4B6B_ENC[b >> 4]:06b}{_MINIMED_4B6B_ENC[b & 0xF]:06b}" for b in frame)
+    bitstr += "0" * (-len(bitstr) % 8)
+    out = B.bits_to_bytes(bitstr)
+    return out + bytes(max(0, pad_len - len(out)))
+
+
+def omnipod(pod_address_hex: str, pkt_type: str = "POD", seq: int = 1,
+            body: bytes = b"\x1d\x18\x02\xad\xa8\x00\x00\x2b\xe7\xff", pad_len: int = 40) -> bytes:
+    """Insulet Omnipod Eros packet (after 0x54C3 sync, Manchester-decoded bytes)."""
+    code = {"PDM": 0b101, "POD": 0b111, "ACK": 0b010}[pkt_type.upper()]
+    addr = bytes.fromhex(pod_address_hex)
+    hdr = addr + bytes([(code << 5) | (seq & 0x1F)]) + addr
+    if code == 0b010:
+        frame = hdr
+    else:
+        msg_crc = B.crc16(bytes([0x24, len(body)]) + body, 0x1021, 0)
+        seg = (body + bytes([msg_crc >> 8, msg_crc & 0xFF]))[:25]
+        frame = hdr + bytes([0x24, len(body)]) + seg
+    out = frame + bytes([B.crc8(frame, 0x07, 0x00)])
+    return out + bytes(max(0, pad_len - len(out)))

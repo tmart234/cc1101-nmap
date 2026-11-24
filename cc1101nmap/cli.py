@@ -36,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--local-freqs", metavar="CSV",
                    help="your area's frequencies (freq_mhz,label,category or a RadioReference-style export)")
     p.add_argument("--allow-sensitive", action="store_true",
-                   help="show replayable remote codes and health-related bands (MedRadio, telecare)")
+                   help="show replayable codes, persistent TPMS IDs, and health/distress/medical bands & devices "
+                        "(MedRadio, EMS MED, 406 MHz beacons, telecare, EU alarms, MiniMed/Omnipod)")
     p.add_argument("--web-host", default="0.0.0.0", help="dashboard bind address (default all interfaces)")
     p.add_argument("--web-port", type=int, default=8080, help="dashboard port (default 8080)")
     p.add_argument("--no-web", action="store_true", help="don't start the dashboard")
@@ -70,11 +71,13 @@ def detect_firmware(host: str) -> str:
 
 
 def print_catalog(cat: Catalog, max_points: int):
-    print(f"Region {cat.region}, tuning {'extended' if cat.extended else 'datasheet'} ranges\n")
+    print(f"Region {cat.region}, tuning {'extended' if cat.extended else 'datasheet'} ranges"
+          f"{', sensitive enabled' if cat.allow_sensitive else ''}\n")
     order = {"decode": 0, "pulses": 1, "energy": 2}
     for e in sorted(cat.entries, key=lambda e: (order[e.detect], e.category)):
         rng = ", ".join(f"{a:g}-{b:g}" for a, b in e.ranges_mhz)
-        print(f"  [{e.detect:6}] {e.name}  ({rng} MHz)")
+        tag = " [sensitive]" if e.sensitive else ""
+        print(f"  [{e.detect:6}] {e.name}{tag}  ({rng} MHz)")
     plan = cat.sweep_plan(max_points)
     print(f"\nRSSI sweep (companion firmware): {sum(s.points for s in plan)} points in {len(plan)} segments")
     print("RX profiles:", ", ".join(f"{p['id']} {p['freq_mhz']} MHz" for p in cat.rx_profiles))

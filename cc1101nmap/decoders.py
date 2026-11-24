@@ -253,6 +253,147 @@ class HoneywellDecoder(PulseDecoder):
             integrity="crc")
 
 
+class MegaCodeDecoder(PulseDecoder):
+    """Linear MegaCode 318 MHz fixed-code OOK transmitters (apartment/HOA/parking
+    gates, garage openers and Linear PERS medical-alert pendants).
+
+    Frame: 24 bits (start bit '1' + 4-bit facility + 16-bit serial + 3-bit button).
+    Each bit occupies a 6T slot (T ~ 1000 us) with a single 1T mark:
+      '1' = 5T space + 1T mark
+      '0' = 2T space + 1T mark + 3T space
+    Inter-frame guard gap is ~11-14T. No checksum, so we require >= 2 identical
+    24-bit frames with strict 1T mark and slot-gap timing.
+    """
+    name = "megacode"
+
+    def decode(self, cap: PulseCapture) -> List[Decoded]:
+        best: Optional[Decoded] = None
+        for p in polarities(cap.pulses):
+            d = self._decode(p)
+            if d and (best is None or d.fields["repeats"] > best.fields["repeats"]):
+                best = d
+        return [best] if best else []
+
+    def _decode(self, p: List[int]) -> Optional[Decoded]:
+        marks = sorted(m for m in p[0::2] if 600 <= m <= 1400)
+        if len(marks) < 48:
+            return None
+        t_us = marks[len(marks) // 2]
+        codes: Counter = Counter()
+        bits: List[str] = []
+        last = 1
+        for i in range(0, len(p), 2):
+            mark = p[i]
+            gap = p[i + 1] if i + 1 < len(p) else int(t_us * 12)
+            if not (0.65 * t_us <= mark <= 1.35 * t_us):
+                bits = []
+                continue
+            if not bits:
+                bits = ["1"]
+                last = 1
+            if gap >= 9.5 * t_us:
+                if len(bits) == 24:
+                    codes["".join(bits)] += 1
+                bits = []
+                continue
+            eff = gap - (3 * t_us if last == 0 else 0)
+            if 3.6 * t_us <= eff <= 6.4 * t_us:
+                bits.append("1")
+                last = 1
+            elif 1.2 * t_us <= eff <= 2.9 * t_us:
+                bits.append("0")
+                last = 0
+            else:
+                bits = []
+        if not codes:
+            return None
+        code_bits, repeats = codes.most_common(1)[0]
+        if repeats < 2:
+            return None
+        code = int(code_bits, 2)
+        if (code >> 23) != 1:
+            return None
+        facility = (code >> 19) & 0xF
+        serial = (code >> 3) & 0xFFFF
+        button = code & 0x7
+        if serial == 0:
+            return None
+        return Decoded(
+            model="Linear MegaCode",
+            catalog_id="gate-318",
+            device_key=f"megacode:{_short_hash(code_bits)}",
+            fields={
+                "code": f"{code:06X}",
+                "facility": facility,
+                "serial": f"{serial:04X}",
+                "button": button,
+                "repeats": repeats,
+            },
+            integrity="repeat",
+            sensitive_fields=("code", "facility", "serial"),
+        )
+
+
+class SchraderTPMSDecoder(PulseDecoder):
+    """Schrader TPMS (GG4 / MRXGG4, 315 MHz US / 433.92 MHz EU).
+
+    OOK Manchester (~120 us half-bit), 68 bits: 4-bit sync then 8 bytes:
+      0xF preamble (4) | flags (8) | id (28) | pressure (8, * 2.5 kPa) |
+      temp (8, C + 50) | CRC-8 (poly 0x07, init 0xF0).
+    Persistent 28-bit tire sensor ID is redacted unless --allow-sensitive.
+    """
+    name = "schrader_tpms"
+
+    def decode(self, cap: PulseCapture) -> List[Decoded]:
+        out: Dict[str, Decoded] = {}
+        for p in polarities(cap.pulses):
+            unit = refine_unit(p, 120)
+            for row in slice_pcm(p, unit, reset_limit=unit * 4):
+                if not 128 <= len(row) <= 152:
+                    continue
+                for candidate in (row, B.invert(row)):
+                    for off in (0, 1):
+                        dec = B.manchester_decode(candidate, off, 76)
+                        if not 64 <= len(dec) <= 74:
+                            continue
+                        d = self._search(dec)
+                        if d:
+                            out[d.device_key] = d
+        return list(out.values())
+
+    @staticmethod
+    def _search(dec: str) -> Optional[Decoded]:
+        for pos in range(0, min(9, len(dec) - 63)):
+            if dec[pos:pos + 4] != "1111":
+                continue
+            b = B.bits_to_bytes(dec, pos, 8)
+            if B.crc8(b[:7], 0x07, 0xF0) != b[7]:
+                continue
+            serial_id = ((b[1] & 0x0F) << 24) | (b[2] << 16) | (b[3] << 8) | b[4]
+            if serial_id in (0, 0x0FFFFFFF):
+                continue
+            pressure_kpa = round(b[5] * 2.5, 1)
+            temp_c = b[6] - 50
+            if not (0 <= pressure_kpa <= 600 and -40 <= temp_c <= 125):
+                continue
+            flags = ((b[0] & 0x0F) << 4) | (b[1] >> 4)
+            id_hex = f"{serial_id:07X}"
+            return Decoded(
+                model="Schrader TPMS",
+                catalog_id="tpms-schrader",
+                device_key=f"tpms-schrader:{_short_hash(id_hex)}",
+                fields={
+                    "id": id_hex,
+                    "pressure_kPa": pressure_kpa,
+                    "temperature_C": temp_c,
+                    "flags": f"{flags:02x}",
+                },
+                integrity="crc",
+                sensitive_fields=("id",),
+            )
+        return None
+
+
 # --------------------------------------------------------------------------
 # Packet decoders (bytes after a CC1101 hardware sync-word match)
 # --------------------------------------------------------------------------
@@ -455,20 +596,158 @@ class WMBusDecoder(PacketDecoder):
             integrity="crc")
 
 
+# Medical insulin pump / CGM protocols (gated behind --allow-sensitive) -------
+
+_MINIMED_4B6B = {
+    0b010101: 0x0, 0b110001: 0x1, 0b110010: 0x2, 0b100011: 0x3,
+    0b110100: 0x4, 0b100101: 0x5, 0b100110: 0x6, 0b010110: 0x7,
+    0b011010: 0x8, 0b011001: 0x9, 0b101010: 0xA, 0b001011: 0xB,
+    0b101100: 0xC, 0b001101: 0xD, 0b001110: 0xE, 0b011100: 0xF,
+}
+
+MINIMED_PACKET_TYPES = {
+    0xA2: "MySentry monitor",
+    0xA5: "Glucose meter",
+    0xA6: "Pump remote",
+    0xA7: "Insulin pump",
+    0xA8: "CGM sensor (test)",
+    0xAA: "CGM sensor",
+    0xAB: "CGM sensor",
+}
+
+
+def minimed_decode_4b6b(data: bytes) -> bytes:
+    """Decode Medtronic 4b6b balanced symbols into bytes, stopping at first invalid code."""
+    bits = B.bytes_to_bits(data)
+    out = bytearray()
+    for i in range(0, len(bits) - 11, 12):
+        hi = _MINIMED_4B6B.get(int(bits[i:i + 6], 2))
+        lo = _MINIMED_4B6B.get(int(bits[i + 6:i + 12], 2))
+        if hi is None or lo is None:
+            break
+        out.append((hi << 4) | lo)
+    return bytes(out)
+
+
+class MedtronicMiniMedDecoder(PacketDecoder):
+    """Medtronic MiniMed Paradigm insulin pumps, Enlite/MiniLink CGM sensors,
+    Contour Link glucose meters and MySentry monitors.
+
+    916.5 MHz (US) / 868.35 MHz (EU), ASK/OOK 16.384 kbaud, sync 0xFF00,
+    4b6b encoded. Verified with CRC-8 (poly 0x9B) or CRC-16/CCITT-FALSE
+    (poly 0x1021, init 0xFFFF) for CGM sensor frames (0xA8/0xAA/0xAB).
+    Presence/role only: clinical readings are never decoded or reported.
+    """
+    name = "minimed"
+    sync = "ff00"
+
+    def decode(self, data: bytes, freq_mhz: float) -> Optional[Decoded]:
+        raw = minimed_decode_4b6b(data)
+        if len(raw) < 5 or raw[0] not in MINIMED_PACKET_TYPES:
+            return None
+        ptype = raw[0]
+        is_cgm = ptype in (0xA8, 0xAA, 0xAB)
+        min_len = 6 if is_cgm else 5
+        frame: Optional[bytes] = None
+        for end in (len(raw), len(raw) - 1):
+            if end < min_len:
+                continue
+            cand = raw[:end]
+            if is_cgm:
+                if B.crc16(cand[:-2], 0x1021, 0xFFFF) == ((cand[-2] << 8) | cand[-1]):
+                    frame = cand
+                    break
+            elif B.crc8(cand[:-1], 0x9B, 0x00) == cand[-1]:
+                frame = cand
+                break
+        if frame is None:
+            return None
+        serial = frame[1:4].hex()
+        if serial in ("000000", "ffffff"):
+            return None
+        role = MINIMED_PACKET_TYPES[ptype]
+        return Decoded(
+            model=f"Medtronic MiniMed ({role})",
+            catalog_id="minimed-pump",
+            device_key=f"minimed:{_short_hash(serial)}",
+            fields={
+                "device_role": role,
+                "packet_type": f"0x{ptype:02x}",
+                "serial": serial,
+            },
+            integrity="crc",
+            sensitive_fields=("serial",),
+        )
+
+
+OMNIPOD_PACKET_TYPES = {0b101: "PDM", 0b111: "Pod", 0b010: "ACK"}
+
+
+class OmnipodDecoder(PacketDecoder):
+    """Insulet Omnipod Eros RF insulin pump pods and PDM controllers.
+
+    433.91 MHz, 2-FSK 40.625 kbaud, Manchester encoded, sync 0x54C3.
+    Verified by matching dual 32-bit pod addresses (bytes 0..3 == bytes 5..8)
+    and CRC-8 (poly 0x07, init 0x00). Presence/role only: dosing and therapy
+    payloads are never decoded or reported.
+    """
+    name = "omnipod"
+    sync = "54c3"
+
+    def decode(self, data: bytes, freq_mhz: float) -> Optional[Decoded]:
+        if len(data) < 10:
+            return None
+        pod1, pod2 = data[0:4], data[5:9]
+        if pod1 != pod2 or pod1 in (b"\x00\x00\x00\x00", b"\xff\xff\xff\xff"):
+            return None
+        ptype = data[4] >> 5
+        if ptype not in OMNIPOD_PACKET_TYPES:
+            return None
+        seq = data[4] & 0x1F
+        if ptype == 0b010:
+            total = 10
+        else:
+            if len(data) < 12:
+                return None
+            body_len = data[10]
+            seg_len = min(25, body_len + 2)
+            total = 11 + seg_len + 1
+            if len(data) < total:
+                return None
+        if B.crc8(data[:total - 1], 0x07, 0x00) != data[total - 1]:
+            return None
+        pod_hex = pod1.hex()
+        role = OMNIPOD_PACKET_TYPES[ptype]
+        return Decoded(
+            model=f"Omnipod Eros ({role})",
+            catalog_id="omnipod-pump",
+            device_key=f"omnipod:{_short_hash(pod_hex)}",
+            fields={
+                "packet_type": role,
+                "sequence": seq,
+                "pod_address": pod_hex,
+            },
+            integrity="crc",
+            sensitive_fields=("pod_address",),
+        )
+
+
 # --------------------------------------------------------------------------
 # Registry
 # --------------------------------------------------------------------------
 
 PULSE_DECODERS: List[PulseDecoder] = [
-    AcuriteTowerDecoder(), LaCrosseTX141THDecoder(), HoneywellDecoder(), EV1527Decoder(),
+    AcuriteTowerDecoder(), LaCrosseTX141THDecoder(), HoneywellDecoder(),
+    SchraderTPMSDecoder(), MegaCodeDecoder(), EV1527Decoder(),
 ]
 
 PACKET_DECODERS: List[PacketDecoder] = [
     LaCrosseITPlusDecoder(), FineOffsetWH24Decoder(), AmbientWH31EDecoder(), WMBusDecoder(),
+    MedtronicMiniMedDecoder(), OmnipodDecoder(),
 ]
 
 # Sync words the companion firmware listens for, with how many bytes to read.
-SYNC_PROFILES = {"2dd4": 20, "543d": 60}
+SYNC_PROFILES = {"2dd4": 20, "543d": 60, "ff00": 60, "54c3": 40}
 
 
 def decode_packet(pkt: Packet) -> List[Decoded]:

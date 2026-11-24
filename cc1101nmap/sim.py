@@ -90,6 +90,16 @@ class SimWorld:
                           lambda d, g: E.honeywell(0x2B7E0, 2, heartbeat=True, rng=g)))
             dev(SimDevice("Doorbell button (EV1527)", 433.92, 230, -66,
                           lambda d, g: E.ev1527(0x6D2A18, 340, rng=g)))
+            dev(SimDevice("Schrader TPMS (parked car)", 315.0, 120, -78,
+                          lambda d, g: E.schrader_tpms(0x6703A38, 225.0, 23, rng=g)))
+            dev(SimDevice("Apartment gate (MegaCode)", 318.0, 240, -74,
+                          lambda d, g: E.megacode(3, 17316, 1, rng=g)))
+            dev(SimDevice("Medtronic MiniMed pump", 916.5, 180, -76,
+                          lambda d, g: ("ff00", E.minimed(0xA7, "597055", b"\x04\x00", pad_len=60)),
+                          mode="ook_pkt"))
+            dev(SimDevice("Omnipod Eros pod", 433.91, 210, -79,
+                          lambda d, g: ("54c3", E.omnipod("1f014829", "POD", 14)),
+                          mode="fsk_pkt"))
             # an unknown, clearly structured signal on 319.5 MHz (Interlogix band)
             dev(SimDevice("Interlogix sensor", 319.5, 300, -77,
                           lambda d, g: E.pwm("1011001110001011101011100101", (500, 250), (250, 500), g) * 3))
@@ -120,11 +130,15 @@ class SimWorld:
             dev(SimDevice("Techem heat allocator", 868.95, 120, -84,
                           lambda d, g: ("543d", E.wmbus_c1a("TCH", "40751122", 0x6A, 0x08)), mode="fsk_pkt"))
             dev(SimDevice("Doorbell (EV1527)", 433.92, 260, -70, lambda d, g: E.ev1527(0x3C5A90, 300, rng=g)))
+            dev(SimDevice("Medtronic MiniMed pump (EU)", 868.35, 180, -77,
+                          lambda d, g: ("ff00", E.minimed(0xA7, "597055", b"\x04\x00", pad_len=60)),
+                          mode="ook_pkt"))
             em = self.emitters.append
             em(Emitter(392.7125, -78, lambda t: True, width_khz=25))
             em(Emitter(382.3375, -45, _cycle(900, [(60, 480)], _bursty(r, 22, 6)), width_khz=25))
             em(Emitter(847.5, -60, _bursty(r, 29, 3), width_khz=5000))
             em(Emitter(868.1, -83, _bursty(r, 70, 0.3), width_khz=125))
+            em(Emitter(869.2125, -72, _bursty(r, 240, 2), width_khz=25))     # EU social alarm (only swept with --allow-sensitive)
             em(Emitter(446.05625, -71, _cycle(800, [(100, 260)], _bursty(r, 15, 4))))
         for d in self.devices:
             d.next_t = self.rng.uniform(1, min(d.period_s, 30))
@@ -180,13 +194,12 @@ class SimBackend(Backend):
             if t < d.next_t:
                 continue
             d.next_t = t + d.period_s * g.uniform(0.9, 1.1)
-            listening = cur and abs(cur["freq_mhz"] - d.freq_mhz) < 0.15 and \
-                (cur["mode"] == "fsk_pkt") == (d.mode == "fsk_pkt")
+            listening = cur and abs(cur["freq_mhz"] - d.freq_mhz) < 0.15 and cur["mode"] == d.mode
             if not listening:
                 continue
             out = d.make(d, g)
             rssi = d.rssi + g.gauss(0, 2)
-            if d.mode == "fsk_pkt":
+            if d.mode in ("fsk_pkt", "ook_pkt"):
                 sync, data = out
                 self.sink.packet(Packet(data, d.freq_mhz, sync, self.stamp(t), round(rssi, 1), 40, "sim"))
             else:

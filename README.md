@@ -25,14 +25,16 @@ Run `python3 -m cc1101nmap --list` to print exactly what's detectable with your 
 |---|---|---|
 | Weather | Acurite 592TXR tower, LaCrosse TX141TH, LaCrosse IT+ (TX29/TX35), Fine Offset WH24/WH65 (Ambient WS-2902, Ecowitt WS69), Ambient WH31E | decoded |
 | Home security | Honeywell/Ademco 5800 and 2GIG sensors at 345 MHz: open/closed, alarm, tamper, battery | decoded |
-| Remotes & sensors | EV1527/PT2262 doorbells, PIR/door sensors, outlets, gate remotes (codes redacted by default) | decoded |
+| Remotes & openers | EV1527/PT2262 doorbells/sensors/remotes, Linear MegaCode 318 MHz gate remotes & PERS pendants (replayable codes redacted by default) | decoded |
+| Vehicles | Schrader TPMS wheel sensors at 315/433.92 MHz (persistent tire tracking IDs redacted by default) | decoded |
 | Utility meters (EU) | Wireless M-Bus T1/C1: manufacturer, serial and type of water/heat/gas meters | decoded |
+| Medical & distress (`--allow-sensitive`) | Medtronic MiniMed insulin pumps/CGM (916.5/868.35 MHz), Omnipod Eros pumps (433.91 MHz) — presence/role only; plus MedRadio implants, US EMS UHF MED channels, 406 MHz PLB/EPIRB/ELT beacons, EU social alarms & Annex 7 safety alarms | decoded / RF energy |
 | Public safety (US) | Radios transmitting on 700 MHz (799-805) and 800 MHz (806-816) public-safety bands; trunked sites (851-861) | RF energy |
 | Public safety (EU) | TETRA emergency-services terminals (380-385 MHz) and base stations (390-395) | RF energy |
 | Government | US federal 406-420 MHz radios | RF energy |
 | Cellular | Phones and modems transmitting (850 MHz, Band 13, FirstNet Band 14; EU LTE 800/900) | RF energy |
 | Other | Freight-train end-of-train devices, FRS/GMRS/PMR446 walkie-talkies, LoRaWAN, Meshtastic, Z-Wave, smart-meter mesh, radiosondes | RF energy |
-| Unidentified | Anything structured on 315/319.5/433.92/868 MHz: key fobs, TPMS, Interlogix sensors... | signal structure |
+| Unidentified | Anything structured on 315/319.5/433.92/868 MHz: key fobs, other TPMS, Interlogix sensors... | signal structure |
 
 ### "Police at the neighbour's", honestly
 
@@ -68,20 +70,20 @@ Limits you should know about:
 | | Stock Evil Crow firmware | cc1101-nmap companion firmware |
 |---|---|---|
 | Flash anything? | No | Yes (`firmware/`) |
-| Decoded OOK devices (433/315/345 MHz) | Yes | Yes, with signal strength |
-| FSK packet devices (915/868 MHz weather, wM-Bus) | No (stock filters pulses < 100 µs) | Yes (CC1101 hardware packet engine) |
-| RSSI sweep: public safety, cellular, LoRa... | No (no RSSI interface) | Yes, about 550 channels per sweep |
+| Decoded OOK devices (433/315/318/345 MHz) | Yes | Yes, with signal strength |
+| Packet devices (915/868 MHz weather, wM-Bus, sensitive pumps) | No (stock filters pulses < 100 µs) | Yes (CC1101 hardware packet engine) |
+| RSSI sweep: public safety, cellular, LoRa... | No (no RSSI interface) | Yes, up to 600 channels per sweep |
 | Distance estimates | No | Yes |
 | Transmit capability | Yes (stock has TX/jammer) | **None. Receive-only.** |
 
 **Stock firmware.** The scanner uses the stock web routes (`/setrx`, `/stoprx`, `/logs`,
 `/delete`) and decodes the pulse captures it writes to the SD card (an SD card must be in).
 The stock interrupt handler records both CC1101s into one buffer, so the scanner listens with
-one module at a time and rotates it through 433.92/315/345/319.5 MHz.
+one module at a time and rotates it through 433.92/315/345/319.5/318 MHz.
 
 **Companion firmware** (`firmware/cc1101_nmap/`). Module 1 sweeps RSSI continuously with
 peak-hold; module 2 captures pulses (with glitch filtering, signal strength and squelch) or
-receives FSK packets by sync word. It reads Wi-Fi settings from the same SD `wifi_config.txt`
+receives FSK/OOK packets by sync word. It reads Wi-Fi settings from the same SD `wifi_config.txt`
 the stock firmware uses, answers as `evilcrow-rf.local`, and its root page links to your
 dashboard once the scanner connects. Build and flash with PlatformIO:
 
@@ -128,7 +130,7 @@ works as the entry point.
 
 Useful options: `--json` (events as JSON lines on stdout), `--events-log FILE`,
 `--record FILE` / `--backend replay --replay FILE` (capture a session and replay it later),
-`--allow-sensitive` (show replayable remote codes and health-related bands), `-q` (warnings and alerts only).
+`--allow-sensitive` (show replayable codes, persistent TPMS IDs, and health/distress/medical bands & devices), `-q` (warnings and alerts only).
 
 ## Dashboard and API
 
@@ -151,8 +153,8 @@ It reveals what's around your location, so don't expose it to the internet.
 
 - Receive-only. Nothing here transmits; the companion firmware has no TX code path.
 - No voice or message content is demodulated. Public-safety, cellular and LoRa detection is signal strength only.
-- Fixed remote codes (which could be replayed to open a gate) are redacted unless `--allow-sensitive`.
-  Health-related bands (MedRadio implants, telecare pendants) are hidden unless `--allow-sensitive`.
+- Replayable fixed remote codes (EV1527/PT2262, Linear MegaCode) and persistent vehicle-tracking IDs (Schrader TPMS) are redacted unless `--allow-sensitive`.
+- Health-, distress- and safety-related bands and devices (MedRadio implants, US EMS UHF MED channels, 406 MHz PLB/EPIRB/ELT distress beacons, EU social alarms and Annex 7 safety alarms, Medtronic MiniMed and Omnipod Eros pumps) are hidden — and their dedicated RX profiles are not tuned — unless `--allow-sensitive`. Even with `--allow-sensitive`, insulin pump decoders report device presence/role only and never decode clinical readings or dosing payloads.
 - Rules on receiving radio differ by country, and some restrict using scanners in vehicles or
   for certain services. You're responsible for using this where it's legal.
 
