@@ -32,7 +32,7 @@
       "ranges_mhz": [[788.0, 798.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
       "meaning": "An LTE device on Band 14 is transmitting: FirstNet (first-responder phones, vehicle routers in patrol cars and engines) or an ordinary AT&T customer, since AT&T carries commercial traffic on Band 14.",
       "caveats": "Weak indicator of first responders on its own; strongest when it coincides with 700/800 MHz public-safety radio activity.",
-      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+      "sweep": {"step_khz": 750, "rxbw_khz": 812}
     },
     {
       "id": "ps-800-base", "category": "public_safety", "regions": ["US"],
@@ -40,7 +40,7 @@
       "ranges_mhz": [[851.0, 861.0]], "detect": "energy", "role": "base", "eirp_dbm": 50, "alert": false,
       "meaning": "Repeater/trunked-site transmitters. Control channels transmit continuously; voice channels light up whenever anyone on the system talks, wherever they are. Shows which systems cover you, not who is nearby.",
       "caveats": "Not a proximity signal - use the 806-816 MHz mobile-transmit entries for that.",
-      "sweep": {"step_khz": 250, "rxbw_khz": 270}
+      "sweep": {"step_khz": 300, "rxbw_khz": 325}
     },
     {
       "id": "ps-700-base", "category": "public_safety", "regions": ["US"], "extended": true,
@@ -48,7 +48,7 @@
       "ranges_mhz": [[769.0, 775.0]], "detect": "energy", "role": "base", "eirp_dbm": 50, "alert": false,
       "meaning": "Base/repeater side of the 700 MHz public-safety band.",
       "caveats": "Below the CC1101's specified 779 MHz limit; needs --extended-range and sensitivity is reduced.",
-      "sweep": {"step_khz": 100, "rxbw_khz": 102}
+      "sweep": {"step_khz": 300, "rxbw_khz": 325}
     },
     {
       "id": "tetra-eu-ul", "category": "public_safety", "regions": ["EU"], "extended": true,
@@ -128,7 +128,7 @@
       "ranges_mhz": [[814.0, 849.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
       "meaning": "A phone, hotspot, car telematics unit or IoT modem is transmitting to a tower (LTE Bands 5/26, 5G n5). Phones transmit during calls and data use; a strong signal means the device is very close.",
       "caveats": "Energy only. Lower 814-816 MHz overlaps 800 MHz land-mobile in some areas.",
-      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+      "sweep": {"step_khz": 750, "rxbw_khz": 812}
     },
     {
       "id": "cell-b13-ul", "category": "cellular", "regions": ["US"],
@@ -136,7 +136,7 @@
       "ranges_mhz": [[779.0, 787.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
       "meaning": "A Verizon LTE device is transmitting (Band 13 uplink, 777-787 MHz).",
       "caveats": "777-779 MHz is below the CC1101's specified range.",
-      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+      "sweep": {"step_khz": 750, "rxbw_khz": 812}
     },
     {
       "id": "cell-850-dl", "category": "cellular", "regions": ["US"],
@@ -149,14 +149,14 @@
       "name": "Mobile phone transmitting (LTE 800)",
       "ranges_mhz": [[832.0, 862.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 23, "alert": false,
       "meaning": "A phone or modem is transmitting on LTE Band 20.", "caveats": "",
-      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+      "sweep": {"step_khz": 750, "rxbw_khz": 812}
     },
     {
       "id": "cell-eu-900-ul", "category": "cellular", "regions": ["EU"],
       "name": "Mobile phone transmitting (GSM/LTE 900)",
       "ranges_mhz": [[880.0, 915.0]], "detect": "energy", "role": "mobile", "eirp_dbm": 30, "alert": false,
       "meaning": "A phone, alarm communicator or modem is transmitting on GSM-900 / LTE Band 8.", "caveats": "",
-      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+      "sweep": {"step_khz": 750, "rxbw_khz": 812}
     },
     {
       "id": "cell-eu-900-dl", "category": "cellular", "regions": ["EU"], "extended": true,
@@ -210,7 +210,7 @@
       "ranges_mhz": [[902.0, 928.0]], "detect": "energy", "role": "device", "eirp_dbm": 20, "alert": false,
       "meaning": "Licence-free 902-928 MHz devices: weather stations, LoRa, Amazon Sidewalk, baby monitors, long-range drone/RC links (ExpressLRS, Crossfire), amateur 33 cm.",
       "caveats": "Generic band match only.",
-      "sweep": {"step_khz": 500, "rxbw_khz": 541}
+      "sweep": {"step_khz": 750, "rxbw_khz": 812}
     },
     {
       "id": "srd-868", "category": "iot", "regions": ["EU"],
@@ -243,23 +243,71 @@
       "id": "social-alarm-eu", "category": "medical", "regions": ["EU"], "sensitive": true,
       "name": "Social alarm / telecare pendant",
       "ranges_mhz": [[869.2, 869.25]], "detect": "energy", "role": "device", "eirp_dbm": 10, "alert": false,
-      "meaning": "869.200-869.250 MHz is reserved for social alarms (personal emergency buttons for elderly or disabled people).",
-      "caveats": "Health-related; hidden unless --allow-sensitive.", "sweep": null
+      "meaning": "869.200-869.250 MHz is reserved exclusively under ERC Rec 70-03 Annex 7 for social alarms (personal emergency buttons for elderly or disabled people).",
+      "caveats": "Health-related; hidden unless --allow-sensitive.",
+      "sweep": {"step_khz": 25, "rxbw_khz": 58}
+    },
+    {
+      "id": "eu-safety-alarms", "category": "home_security", "regions": ["EU"], "sensitive": true,
+      "name": "Dedicated safety / security alarm band (EU 868/869 MHz)",
+      "ranges_mhz": [[868.6, 868.7], [869.25, 869.4], [869.65, 869.7]], "detect": "energy", "role": "device", "eirp_dbm": 10, "alert": false,
+      "meaning": "CEPT/ERC Rec 70-03 Annex 7 bands reserved for reliable safety and security alarms (intruder, fire, lone-worker and assisted-living alarm peripherals; general SRDs are excluded).",
+      "caveats": "Safety/security-related; hidden unless --allow-sensitive.",
+      "sweep": {"step_khz": 50, "rxbw_khz": 58}
     },
     {
       "id": "radiosonde", "category": "science", "regions": ["US", "EU"],
       "name": "Weather balloon (radiosonde)",
       "ranges_mhz": [[400.15, 406.0]], "detect": "energy", "role": "device", "eirp_dbm": 17, "alert": false,
       "meaning": "Radiosondes launched twice daily (00/12 UTC) by weather services transmit position and readings about once per second for ~2 hours as they climb to 30 km.",
-      "caveats": "US NWS sondes mostly use 1680 MHz (out of range); 400-406 MHz is used across Europe and elsewhere. Shares the band with MedRadio.",
+      "caveats": "400-406 MHz is used widely across Europe and increasingly by US NWS stations (transitioned from 1680 MHz). Shares 401-406 MHz with MedRadio.",
       "sweep": {"step_khz": 200, "rxbw_khz": 203}
     },
     {
       "id": "medradio", "category": "medical", "regions": ["US", "EU"], "sensitive": true,
       "name": "Medical implant / body-worn device telemetry",
       "ranges_mhz": [[401.0, 406.0]], "detect": "energy", "role": "device", "eirp_dbm": -16, "alert": false,
-      "meaning": "MedRadio/MICS: pacemakers, defibrillators, neurostimulators and their bedside monitors.",
-      "caveats": "Health-related; hidden unless --allow-sensitive. Range is only a few metres.", "sweep": null
+      "meaning": "MedRadio/MICS (402-405 MHz primary implant band; 401-402 and 405-406 MHz body-worn/wing bands): pacemakers, defibrillators, neurostimulators and their bedside monitors.",
+      "caveats": "Health-related; hidden unless --allow-sensitive. Range is only a few metres (25 uW limit). Shares 401-406 MHz with much stronger weather balloons (radiosondes).",
+      "sweep": null
+    },
+    {
+      "id": "cospas-sarsat", "category": "medical", "regions": ["US", "EU"], "sensitive": true,
+      "name": "406 MHz emergency distress beacon (PLB/EPIRB/ELT)",
+      "ranges_mhz": [[406.0, 406.1]], "detect": "energy", "role": "device", "eirp_dbm": 37, "alert": true,
+      "meaning": "406.0-406.1 MHz is reserved worldwide by ITU for COSPAS-SARSAT emergency distress beacons: personal locator beacons (PLB), maritime EPIRBs and aircraft ELTs (5 W bursts every ~50 s).",
+      "caveats": "Distress/life-safety band; hidden unless --allow-sensitive. Energy only; could also be an authorised self-test burst or interference.",
+      "sweep": {"step_khz": 50, "rxbw_khz": 58}
+    },
+    {
+      "id": "ems-med-mobile-us", "category": "medical", "regions": ["US"], "sensitive": true, "extended": true,
+      "name": "EMS ambulance / biomedical telemetry transmitting (UHF MED)",
+      "ranges_mhz": [[467.9375, 468.1875]], "detect": "energy", "role": "mobile", "eirp_dbm": 37, "alert": true,
+      "meaning": "FCC Part 90 UHF MED-1 through MED-10 mobile-transmit channels (467.950-468.1875 MHz): ambulances and paramedics talking to hospital emergency rooms or sending field biomedical telemetry.",
+      "caveats": "Health/emergency-related; hidden unless --allow-sensitive. Above the CC1101's 464 MHz datasheet limit; needs --extended-range. Energy only.",
+      "sweep": {"step_khz": 50, "rxbw_khz": 58}
+    },
+    {
+      "id": "ems-med-base-us", "category": "medical", "regions": ["US"], "sensitive": true,
+      "name": "EMS hospital / CMED dispatch channel (UHF MED)",
+      "ranges_mhz": [[462.9375, 463.1875]], "detect": "energy", "role": "base", "eirp_dbm": 50, "alert": false,
+      "meaning": "FCC Part 90 UHF MED-1 through MED-10 base/hospital channels (462.950-463.1875 MHz) used for EMS dispatch and hospital medical control.",
+      "caveats": "Health/emergency-related; hidden unless --allow-sensitive. Base/repeater side; shows regional EMS activity, not proximity.",
+      "sweep": {"step_khz": 50, "rxbw_khz": 58}
+    },
+    {
+      "id": "minimed-pump", "category": "medical", "regions": ["US", "EU"], "sensitive": true,
+      "name": "Medtronic MiniMed insulin pump / CGM",
+      "ranges_mhz": [[916.4, 916.6], [868.25, 868.45]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false, "interval_s": 300,
+      "meaning": "Medtronic Paradigm insulin pumps, MiniLink/Enlite CGM transmitters, Contour Link glucose meters and MySentry monitors (916.5 MHz US / 868.35 MHz EU, 4b6b + CRC-8/16).",
+      "caveats": "Health-related; hidden unless --allow-sensitive. Only device presence/type is reported; clinical glucose and dosing data are never decoded or shown."
+    },
+    {
+      "id": "omnipod-pump", "category": "medical", "regions": ["US", "EU"], "sensitive": true,
+      "name": "Omnipod Eros RF insulin pump",
+      "ranges_mhz": [[433.81, 434.01]], "detect": "decode", "role": "device", "eirp_dbm": 0, "alert": false, "interval_s": 300,
+      "meaning": "Insulet Omnipod Eros RF pods and PDM controllers (433.91 MHz 2-FSK Manchester, dual pod-address + CRC-8 verified).",
+      "caveats": "Health-related; hidden unless --allow-sensitive. Only packet role is reported; dosing and therapy payloads are never decoded or shown."
     },
 
     {
@@ -314,11 +362,18 @@
       "caveats": "The chip alone doesn't say which kind of product it is. Codes are redacted by default because they can be replayed."
     },
     {
+      "id": "tpms-schrader", "category": "vehicle", "regions": ["US", "EU"],
+      "name": "Tire-pressure sensor (Schrader TPMS)",
+      "ranges_mhz": [[314.8, 315.2], [433.82, 434.02]], "detect": "decode", "role": "device", "eirp_dbm": -10, "alert": false, "interval_s": 60,
+      "meaning": "Schrader TPMS wheel sensors (common on GM, Chrysler/Jeep/Dodge, Opel/Vauxhall and aftermarket kits) broadcast tire pressure, temperature and a permanent 28-bit ID.",
+      "caveats": "Sensor IDs are persistent and can track individual vehicles, so the ID is redacted by default unless --allow-sensitive."
+    },
+    {
       "id": "vehicle-315", "category": "vehicle", "regions": ["US"],
       "name": "Car key fob / tire-pressure sensor / garage remote (315 MHz)",
       "ranges_mhz": [[314.0, 316.0]], "detect": "pulses", "role": "device", "eirp_dbm": -10, "alert": false,
       "meaning": "In North America 315 MHz carries most car key fobs, tire-pressure (TPMS) sensors on passing/parked cars, and many garage-door remotes.",
-      "caveats": "Identified by band and timing; specific TPMS/fob protocols are not decoded yet."
+      "caveats": "Identified by band and timing; Schrader OOK TPMS is decoded, while other TPMS/fob protocols appear here."
     },
     {
       "id": "garage-310-390", "category": "remote_control", "regions": ["US"],
@@ -329,9 +384,10 @@
     },
     {
       "id": "gate-318", "category": "remote_control", "regions": ["US"],
-      "name": "Gate/garage remote (Linear MegaCode, 318 MHz)",
-      "ranges_mhz": [[317.8, 318.2]], "detect": "pulses", "role": "device", "eirp_dbm": -10, "alert": false,
-      "meaning": "Linear MegaCode remotes used for apartment, HOA and parking gates.", "caveats": ""
+      "name": "Gate remote / PERS pendant (Linear MegaCode, 318 MHz)",
+      "ranges_mhz": [[317.8, 318.2]], "detect": "decode", "role": "device", "eirp_dbm": -10, "alert": false,
+      "meaning": "Linear MegaCode 24-bit fixed-code transmitters used for apartment/HOA/parking gates, garage openers and Linear personal emergency response (PERS) alert pendants.",
+      "caveats": "Fixed codes are replayable, so code, facility and serial fields are redacted by default unless --allow-sensitive."
     },
     {
       "id": "ism-433", "category": "iot", "regions": ["US", "EU"],
@@ -351,13 +407,15 @@
 
   "rx_profiles": [
     {"id": "ook-433", "regions": ["US", "EU"], "freq_mhz": 433.92, "mode": "ook", "rxbw_khz": 270, "drate_kbaud": 5, "dwell_s": 90, "pin": true,
-     "why": "Weather sensors, doorbells, remotes, sensors"},
+     "why": "Weather sensors, doorbells, remotes, TPMS, sensors"},
     {"id": "ook-315", "regions": ["US"], "freq_mhz": 315.0, "mode": "ook", "rxbw_khz": 270, "drate_kbaud": 5, "dwell_s": 45,
-     "why": "Key fobs, TPMS, garage remotes"},
+     "why": "Key fobs, Schrader TPMS, garage remotes"},
     {"id": "ook-345", "regions": ["US"], "freq_mhz": 345.0, "mode": "ook", "rxbw_khz": 203, "drate_kbaud": 8, "dwell_s": 60,
      "why": "Honeywell/2GIG alarm sensors"},
     {"id": "ook-319", "regions": ["US"], "freq_mhz": 319.5, "mode": "ook", "rxbw_khz": 203, "drate_kbaud": 5, "dwell_s": 30,
      "why": "Interlogix/GE alarm sensors"},
+    {"id": "ook-318", "regions": ["US"], "freq_mhz": 318.0, "mode": "ook", "rxbw_khz": 203, "drate_kbaud": 2, "dwell_s": 20,
+     "why": "Linear MegaCode gate remotes and PERS pendants"},
     {"id": "fsk-915", "regions": ["US"], "freq_mhz": 915.0, "mode": "fsk_pkt", "sync": "2dd4", "pktlen": 20, "rxbw_khz": 203, "drate_kbaud": 17.24, "dev_khz": 38, "dwell_s": 60, "fw": "nmap",
      "why": "Ambient Weather/Ecowitt/LaCrosse 915 MHz weather sensors"},
     {"id": "fsk-868", "regions": ["EU"], "freq_mhz": 868.3, "mode": "fsk_pkt", "sync": "2dd4", "pktlen": 20, "rxbw_khz": 203, "drate_kbaud": 17.24, "dev_khz": 38, "dwell_s": 60, "fw": "nmap",
@@ -365,6 +423,12 @@
     {"id": "wmbus-t1", "regions": ["EU"], "freq_mhz": 868.95, "mode": "fsk_pkt", "sync": "543d", "pktlen": 60, "rxbw_khz": 325, "drate_kbaud": 100, "dev_khz": 50, "dwell_s": 60, "fw": "nmap",
      "why": "Wireless M-Bus utility meters"},
     {"id": "ook-868", "regions": ["EU"], "freq_mhz": 868.35, "mode": "ook", "rxbw_khz": 270, "drate_kbaud": 5, "dwell_s": 30,
-     "why": "868 MHz OOK alarm sensors and remotes"}
+     "why": "868 MHz OOK alarm sensors and remotes"},
+    {"id": "ook-916-minimed", "regions": ["US"], "freq_mhz": 916.5, "mode": "ook_pkt", "sync": "ff00", "pktlen": 60, "rxbw_khz": 203, "drate_kbaud": 16.384, "dwell_s": 30, "fw": "nmap", "sensitive": true,
+     "why": "Medtronic MiniMed insulin pumps / CGM (US, --allow-sensitive)"},
+    {"id": "ook-868-minimed", "regions": ["EU"], "freq_mhz": 868.35, "mode": "ook_pkt", "sync": "ff00", "pktlen": 60, "rxbw_khz": 203, "drate_kbaud": 16.384, "dwell_s": 30, "fw": "nmap", "sensitive": true,
+     "why": "Medtronic MiniMed insulin pumps / CGM (EU, --allow-sensitive)"},
+    {"id": "fsk-433-omnipod", "regions": ["US", "EU"], "freq_mhz": 433.91, "mode": "fsk_pkt", "sync": "54c3", "pktlen": 40, "rxbw_khz": 203, "drate_kbaud": 40.625, "dev_khz": 25, "manchester": true, "dwell_s": 30, "fw": "nmap", "sensitive": true,
+     "why": "Omnipod Eros RF insulin pumps (--allow-sensitive)"}
   ]
 }

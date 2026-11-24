@@ -192,16 +192,20 @@ function summary(it) {
   const f = it.fields || {}, out = [];
   if (f.temperature_C !== undefined) out.push(`${esc(f.temperature_C)} °C`);
   if (f.humidity_pct !== undefined) out.push(`${esc(f.humidity_pct)} %`);
+  if (f.pressure_kPa !== undefined) out.push(`${esc(f.pressure_kPa)} kPa`);
   if (f.wind_avg_m_s !== undefined) out.push(`wind ${esc(f.wind_avg_m_s)} m/s`);
   if (f.wind_dir_deg !== undefined) out.push(`${esc(f.wind_dir_deg)}°`);
   if (f.rain_mm !== undefined) out.push(`rain ${esc(f.rain_mm)} mm`);
   if (f.state) out.push(f.state === "open" ? `<span class="warn">open</span>` : "closed");
   if (f.alarm) out.push(`<span class="bad">ALARM</span>`);
   if (f.tamper) out.push(`<span class="bad">tamper</span>`);
+  if (f.device_role) out.push(esc(f.device_role));
+  else if (f.packet_type) out.push(esc(f.packet_type));
   if (f.manufacturer) out.push(esc(f.manufacturer));
   if (f.device_type) out.push(esc(f.device_type.toLowerCase()));
   if (f.serial) out.push("#" + esc(f.serial));
   if (f.chip_guess) out.push(esc(f.chip_guess) + " · button " + esc(f.button_bits));
+  else if (f.button !== undefined) out.push("button " + esc(f.button));
   if (f.channel !== undefined && !f.serial) out.push("ch " + esc(f.channel));
   if (f.id !== undefined && !f.serial) out.push("id " + esc(f.id));
   if (f.battery_ok === false) out.push(`<span class="warn">battery low</span>`);
@@ -354,7 +358,7 @@ function drawSpectrum(sp) {
     if (last) {
       const n = last.idx.length, j = last.idx[n - 1], d = f - sp.freqs[j];
       const step = n > 1 ? sp.freqs[j] - sp.freqs[last.idx[n - 2]] : d;
-      if (d > 0 && d < 0.6 && Math.abs(d - step) < 0.002) { last.idx.push(i); return; }
+      if (d > 0 && d < 1.0 && Math.abs(d - step) < 0.002) { last.idx.push(i); return; }
     }
     segs.push({idx: [i]});
   });

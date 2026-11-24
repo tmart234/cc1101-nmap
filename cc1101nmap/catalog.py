@@ -106,7 +106,9 @@ class Catalog:
         self.all_entries = list(entries)
         self.entries = [e for e in entries if self._active(e)]
         self._by_id: Dict[str, Entry] = {e.id: e for e in entries}
-        self.rx_profiles = [p for p in rx_profiles if self.region in p.get("regions", [self.region])
+        self.rx_profiles = [p for p in rx_profiles
+                            if (self.allow_sensitive or not p.get("sensitive"))
+                            and self.region in p.get("regions", [self.region])
                             and tunable(p["freq_mhz"], extended)]
 
     def _active(self, e: Entry) -> bool:
@@ -151,7 +153,9 @@ class Catalog:
                 return 0
             if e.alert:
                 return 1
-            return {"mobile": 2, "device": 3, "base": 4}.get(e.role, 5)
+            if e.sensitive:
+                return 2
+            return {"mobile": 3, "device": 4, "base": 5}.get(e.role, 6)
 
         segs: List[Tuple[int, Segment]] = []
         for e in self.entries:
